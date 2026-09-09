@@ -95,7 +95,9 @@ Skrypt zdejmuje białe tło, przycina do napisu, robi wariant z czarnym i z bia�
 do bloku `LOGOS` w `web/app.html`. Dzięki temu aplikacja zostaje jednym plikiem, a znaki
 przełączają się razem z motywem. Po podmianie plików źródłowych uruchom skrypt jeszcze raz.
 
-Znak HERO stoi w pasku górnym, MediTag na wizualizacji opaski, SPACER w stopce.
+Znak HERO stoi w pasku górnym, MediTag na wizualizacji opaski, SPACER w stopce. Znak SPACER
+w stopce jest odnośnikiem na stronę zespołu; adres jest bezwzględny (`.spacer-link` w `web/app.html`),
+bo ten sam plik chodzi na stronie SPACER, na serwerze HERO i jako Artifact.
 
 ## Licencja
 
