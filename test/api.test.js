@@ -12,11 +12,12 @@ const PIN = digest(TAG, "4321");
 let server, store, base;
 const call = (path, opts = {}) => fetch(base + path, opts);
 const json = async (path, opts) => { const r = await call(path, opts); return { status: r.status, body: r.status === 204 ? null : await r.json() }; };
+const session = (tag, dg) => json(`/api/cards/${tag}/session`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ digest: dg }) });
 const put = (path, body, pin) => json(path, { method: "PUT", headers: { "content-type": "application/json", ...(pin ? { "x-hero-pin": pin } : {}) }, body: JSON.stringify(body) });
 
 before(async () => {
   store = openDatabase(":memory:");
-  server = createServer(store, rateLimiter({ limit: 12, windowMs: 60_000 }));
+  server = createServer(store, rateLimiter({ limit: 12, windowMs: 60_000 }), rateLimiter({ limit: 5, windowMs: 60_000 }));
   await new Promise(r => server.listen(0, r));
   base = `http://127.0.0.1:${server.address().port}`;
 });
@@ -151,6 +152,21 @@ test("podpis z bazy zostaje przy wpisie niezmienionym i znika po edycji", async 
 
   const forged = await put(`/api/cards/${tag}`, { meds: [{ id: "m9", name: "Warfaryna", source: "lekarz" }] }, pin);
   assert.equal(forged.body.meds[0].source, "pacjent");
+});
+
+test("seria błędnych PIN-ów zamyka próby do tej karty", async () => {
+  const tag = "HERO-4000-DD";
+  const dobry = digest(tag, "4321");
+  const zly = digest(tag, "0000");
+  assert.equal((await put(`/api/cards/${tag}`, { pinHash: dobry }, null)).status, 201);
+
+  for (let i = 0; i < 4; i++) assert.equal((await session(tag, zly)).status, 403);
+  assert.equal((await session(tag, dobry)).status, 200);   /* poprawny PIN kasuje licznik */
+
+  for (let i = 0; i < 5; i++) assert.equal((await session(tag, zly)).status, 403);
+  assert.equal((await session(tag, zly)).status, 429);
+  assert.equal((await session(tag, dobry)).status, 429);   /* blokada nie ustępuje przed czasem */
+  assert.equal((await put(`/api/cards/${tag}`, { pinHash: dobry }, dobry)).status, 429);
 });
 
 test("kartę usuwa tylko właściciel PIN-u, razem z historią", async () => {

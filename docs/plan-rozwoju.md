@@ -99,7 +99,8 @@ odczycie ratunkowym nikt nie sprawdzi u pacjenta.
 
 ## Dług techniczny do spłacenia po drodze
 
-- limit prób PIN-u i limit żądań na adres IP,
+- wspólny magazyn dla liczników z `server/limit.js` (dziś pamięć procesu: restart zeruje limit prób
+  PIN-u, a każda instancja liczy osobno),
 - TLS i nagłówki bezpieczeństwa (dziś zakładany reverse proxy),
 - zmiana PIN-u bez usuwania karty,
 - migracje schematu (dziś `CREATE TABLE IF NOT EXISTS` przy starcie),

@@ -48,7 +48,9 @@ async function serveStatic(res, pathname) {
   }
 }
 
-export function createServer(store = openDatabase(), reads = rateLimiter({ limit: 30, windowMs: 60_000 })) {
+export function createServer(store = openDatabase(),
+                             reads = rateLimiter({ limit: 30, windowMs: 60_000 }),
+                             pins = rateLimiter({ limit: 10, windowMs: 15 * 60_000 })) {
   const server = createHttpServer(async (req, res) => {
     const url = new URL(req.url, "http://localhost");
     const path = decodeURIComponent(url.pathname);
@@ -70,11 +72,20 @@ export function createServer(store = openDatabase(), reads = rateLimiter({ limit
       const sub = m[2];
       if (!TAG.test(tagId)) return fail(res, 400, "Nieprawidłowy identyfikator opaski");
 
+      /* Limit prób PIN-u liczony osobno dla pary adres–opaska; poprawny PIN kasuje licznik. */
+      const pinKey = (req.socket.remoteAddress || "?") + " " + tagId;
+      const afterPin = out => {
+        if (out.status === 403) pins.record(pinKey); else pins.clear(pinKey);
+        return out;
+      };
+
       if (sub === "/session") {
         if (req.method !== "POST") return fail(res, 405, "Nieobsługiwana metoda");
+        if (pins.blocked(pinKey)) return fail(res, 429, "Za dużo prób PIN-u do tej karty");
         const body = await readJson(req);
         if (!store.has(tagId)) return fail(res, 404, "Nie ma karty o tym identyfikatorze");
-        if (!store.checkPin(tagId, body.digest)) return fail(res, 403, "Nieprawidłowy PIN karty");
+        if (!store.checkPin(tagId, body.digest)) { pins.record(pinKey); return fail(res, 403, "Nieprawidłowy PIN karty"); }
+        pins.clear(pinKey);
         return send(res, 200, store.fullCard(tagId));
       }
 
@@ -95,12 +106,14 @@ export function createServer(store = openDatabase(), reads = rateLimiter({ limit
         return card ? send(res, 200, card) : fail(res, 404, "Nie ma karty o tym identyfikatorze");
       }
       if (req.method === "PUT") {
+        if (pins.blocked(pinKey)) return fail(res, 429, "Za dużo prób PIN-u do tej karty");
         const body = await readJson(req);
-        const out = store.upsert(tagId, body, req.headers["x-hero-pin"] || body.pinHash);
+        const out = afterPin(store.upsert(tagId, body, req.headers["x-hero-pin"] || body.pinHash));
         return out.error ? fail(res, out.status, out.error) : send(res, out.status, out.card);
       }
       if (req.method === "DELETE") {
-        const out = store.remove(tagId, req.headers["x-hero-pin"]);
+        if (pins.blocked(pinKey)) return fail(res, 429, "Za dużo prób PIN-u do tej karty");
+        const out = afterPin(store.remove(tagId, req.headers["x-hero-pin"]));
         return out.error ? fail(res, out.status, out.error) : send(res, 204);
       }
       return fail(res, 405, "Nieobsługiwana metoda");

@@ -74,9 +74,11 @@ docs/             model danych i plan rozwoju
 Endpointy oznaczone „—" nie sprawdzają niczego poza poprawnością identyfikatora opaski: treść karty
 pobiera każdy, kto zna identyfikator, i każdy może dopisać wpis do historii odczytów. Karty zwykłej
 nie da się jednak wyszukać — `GET /api/cards` oddaje wyłącznie karty z `demo = 1`, a ten znacznik
-nadaje tylko `npm run seed`, bo żądanie HTTP go nie ustawia. Zapis odczytu jest ograniczony do
-30 żądań na minutę z jednego adresu (`server/limit.js`, licznik w pamięci procesu); powyżej serwer
-odpowiada 429. Za reverse proxy widzi adres proxy, więc limit trzeba postawić także tam. `GET /api/health` podaje samą liczbę kart w bazie,
+nadaje tylko `npm run seed`, bo żądanie HTTP go nie ustawia. Dwa liczniki w `server/limit.js` (oba w pamięci procesu, oba odpowiadają 429 po przekroczeniu):
+zapis odczytu — 30 żądań na minutę z jednego adresu; próby PIN-u — 10 nieudanych na 15 minut,
+liczone osobno dla pary adres–opaska, a poprawny PIN kasuje licznik. Blokada obejmuje wszystkie
+ścieżki z PIN-em: sesję, zapis i usunięcie karty. Za reverse proxy serwer widzi adres proxy, więc
+limit trzeba postawić także tam. `GET /api/health` podaje samą liczbę kart w bazie,
 bez identyfikatorów.
 
 `GET /api/cards/:tag` oddaje kartę w całości, także rozpoznania ze statusem `przebyta`. Zawężenie do
@@ -101,7 +103,8 @@ Stan na dziś to działający prototyp, nie system produkcyjny. Przed wdrożenie
 - **Opis czytnika w historii jest deklaracją.** Kontekst wpisu nadaje serwer, a dostęp lekarza wymaga
   PIN-u, ale pole „kto odczytał" przy odczycie ratunkowym nadal wypełnia klient. Historia dowodzi,
   że ktoś sięgnął po kartę, nie tego, kto to był; potwierdzi to dopiero uwierzytelnienie czytnika.
-- **Brak limitu prób PIN-u** i brak TLS po stronie serwera (zakładany reverse proxy).
+- **Brak TLS po stronie serwera** (zakładany reverse proxy). Limit prób PIN-u działa, ale licznik
+  żyje w pamięci procesu: restart serwera go zeruje, a przy kilku instancjach każda liczy osobno.
 - **Skrót PIN-u siedzi w `sessionStorage`** na czas sesji przeglądarki.
 - **RODO.** Dane o zdrowiu to szczególna kategoria danych osobowych (art. 9 RODO). Przed produkcją:
   ocena skutków dla ochrony danych, szyfrowanie bazy w spoczynku, retencja i eksport danych,
