@@ -1,0 +1,829 @@
+<!doctype html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="HERO — Health Emergency Read Out. Karta ratunkowa pacjenta dla opaski MediTag NFC.">
+<title>MediTag HERO</title>
+<style>*{box-sizing:border-box}body{margin:0}img{max-width:100%}[hidden]{display:none!important}</style>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Source+Sans+3:wght@400;600&display=swap">
+<style>
+:root{
+  --ground:#EDF1F2; --surface:#FFFFFF; --surface-2:#F5F8F9; --sunken:#E3EAEC;
+  --ink:#101C22; --ink-2:#4C6068; --ink-3:#71858C;
+  --line:#D3DDDF; --line-2:#BECBCE;
+  --brand:#0E5A64; --brand-2:#0A454D; --brand-soft:#DCEBED;
+  --crit:#C8102E; --crit-soft:#FBE4E7;
+  --warn:#A45A07; --warn-soft:#FAEEDF;
+  --ok:#1C6E56; --ok-soft:#DFEFE9;
+  --spacer-red:#E0362B; --on-brand:#FFFFFF; --on-crit:#FFFFFF;
+  --shadow:0 1px 2px rgba(16,28,34,.06), 0 8px 24px -16px rgba(16,28,34,.4);
+  --r:10px;
+  --f-disp:"Archivo",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --f-body:"Source Sans 3",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --f-mono:"IBM Plex Mono",ui-monospace,"SFMono-Regular",Consolas,monospace;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --ground:#0A1317; --surface:#101D22; --surface-2:#152429; --sunken:#0D1A1F;
+    --ink:#E6EDEF; --ink-2:#93A9B0; --ink-3:#7B9199;
+    --line:#1F343A; --line-2:#2B454C;
+    --brand:#43BAC6; --brand-2:#6FD3DC; --brand-soft:#0F2C31;
+    --crit:#FF6B79; --crit-soft:#2E1418;
+    --warn:#E2A24C; --warn-soft:#2A2013;
+    --ok:#54C79E; --ok-soft:#0F2820;
+    --spacer-red:#FF564A; --on-brand:#04191D; --on-crit:#2B0A0F;
+    --shadow:0 1px 2px rgba(0,0,0,.4), 0 10px 28px -18px rgba(0,0,0,.9);
+  }
+}
+:root[data-theme="dark"]{
+  --ground:#0A1317; --surface:#101D22; --surface-2:#152429; --sunken:#0D1A1F;
+  --ink:#E6EDEF; --ink-2:#93A9B0; --ink-3:#7B9199;
+  --line:#1F343A; --line-2:#2B454C;
+  --brand:#43BAC6; --brand-2:#6FD3DC; --brand-soft:#0F2C31;
+  --crit:#FF6B79; --crit-soft:#2E1418;
+  --warn:#E2A24C; --warn-soft:#2A2013;
+  --ok:#54C79E; --ok-soft:#0F2820;
+  --spacer-red:#FF564A; --on-brand:#04191D; --on-crit:#2B0A0F;
+  --shadow:0 1px 2px rgba(0,0,0,.4), 0 10px 28px -18px rgba(0,0,0,.9);
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--ground);color:var(--ink);font-family:var(--f-body);font-size:16px;line-height:1.55;-webkit-font-smoothing:antialiased}
+h1,h2,h3,h4{font-family:var(--f-disp);margin:0;letter-spacing:-.015em;text-wrap:balance;line-height:1.15}
+h1{font-size:clamp(2rem,1.3rem + 2.6vw,3.1rem);font-weight:700}
+h2{font-size:clamp(1.35rem,1.1rem + .9vw,1.8rem);font-weight:600}
+h3{font-size:1.06rem;font-weight:600}
+p{margin:0}
+a{color:var(--brand);text-underline-offset:3px}
+code,.mono{font-family:var(--f-mono)}
+:focus-visible{outline:2px solid var(--brand);outline-offset:2px;border-radius:4px}
+@media (prefers-reduced-motion:reduce){*{animation-duration:.001ms!important;transition-duration:.001ms!important}}
+
+.wrap{width:min(1120px,100% - 2.5rem);margin-inline:auto}
+.eyebrow{font-family:var(--f-mono);font-size:.72rem;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3);font-weight:500}
+
+/* ---------- top bar ---------- */
+.topbar{position:sticky;top:0;z-index:40;background:color-mix(in srgb,var(--surface) 88%,transparent);backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+.topbar .wrap{display:flex;align-items:center;gap:1rem;height:60px}
+.brand{display:flex;align-items:center;gap:.6rem;text-decoration:none;color:var(--ink);font-family:var(--f-disp);font-weight:700;font-size:1.02rem;letter-spacing:-.02em}
+.brand .sub{color:var(--ink-3);font-weight:500}
+.nav{display:flex;gap:.15rem;margin-left:auto;flex-wrap:wrap}
+.nav a{font-size:.9rem;color:var(--ink-2);text-decoration:none;padding:.35rem .6rem;border-radius:7px}
+.nav a:hover{background:var(--surface-2);color:var(--ink)}
+.nav a[aria-current="page"]{background:var(--brand-soft);color:var(--brand);font-weight:600}
+.chip-mode{font-family:var(--f-mono);font-size:.68rem;letter-spacing:.06em;padding:.2rem .45rem;border:1px solid var(--line-2);border-radius:5px;color:var(--ink-3);white-space:nowrap}
+.chip-mode[data-on="api"]{color:var(--ok);border-color:var(--ok)}
+@media (max-width:720px){.topbar .wrap{height:auto;padding-block:.5rem;flex-wrap:wrap}.nav{width:100%;margin-left:0;order:3}.chip-mode{margin-left:auto}}
+
+/* ---------- generic blocks ---------- */
+main{padding-block:2.2rem 3rem;min-height:60vh}
+[id]{scroll-margin-top:80px}
+.stack{display:flex;flex-direction:column;gap:1.15rem}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow)}
+.panel-h{display:flex;align-items:center;gap:.7rem;padding:.85rem 1.1rem;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.panel-h h3{flex:1 1 auto}
+.panel-b{padding:1.1rem}
+.muted{color:var(--ink-2)}
+.small{font-size:.88rem}
+.tiny{font-size:.8rem}
+
+.btn{font-family:var(--f-body);font-size:.92rem;font-weight:600;border-radius:8px;border:1px solid var(--line-2);background:var(--surface);color:var(--ink);padding:.52rem .95rem;cursor:pointer;display:inline-flex;align-items:center;gap:.4rem;transition:background .15s,border-color .15s,transform .1s}
+.btn:hover{background:var(--surface-2)}
+.btn:active{transform:translateY(1px)}
+.btn-primary{background:var(--brand);border-color:var(--brand);color:var(--on-brand)}
+.btn-primary:hover{background:var(--brand-2);border-color:var(--brand-2)}
+.btn-crit{background:var(--crit);border-color:var(--crit);color:var(--on-crit)}
+.btn-ghost{background:transparent;border-color:transparent;color:var(--ink-2);padding:.35rem .5rem}
+.btn-ghost:hover{background:var(--surface-2);color:var(--ink)}
+.btn-sm{font-size:.82rem;padding:.32rem .6rem}
+.btn[disabled]{opacity:.5;cursor:not-allowed}
+
+label.f{display:flex;flex-direction:column;gap:.28rem;font-size:.82rem;color:var(--ink-2);font-weight:600}
+input,select,textarea{font-family:var(--f-body);font-size:.95rem;color:var(--ink);background:var(--surface-2);border:1px solid var(--line-2);border-radius:7px;padding:.5rem .6rem;width:100%}
+input.mono{font-family:var(--f-mono);letter-spacing:.04em}
+textarea{min-height:70px;resize:vertical}
+input::placeholder,textarea::placeholder{color:var(--ink-3)}
+.grid{display:grid;gap:.8rem}
+.g2{grid-template-columns:repeat(auto-fit,minmax(190px,1fr))}
+.g3{grid-template-columns:repeat(auto-fit,minmax(150px,1fr))}
+.row{display:flex;gap:.6rem;flex-wrap:wrap;align-items:flex-end}
+.check{display:flex;align-items:center;gap:.45rem;font-size:.9rem;color:var(--ink-2);font-weight:600}
+.check input{width:auto}
+
+.tag{display:inline-flex;align-items:center;gap:.3rem;font-size:.74rem;font-weight:600;padding:.12rem .42rem;border-radius:5px;background:var(--sunken);color:var(--ink-2);white-space:nowrap}
+.tag-crit{background:var(--crit-soft);color:var(--crit)}
+.tag-warn{background:var(--warn-soft);color:var(--warn)}
+.tag-ok{background:var(--ok-soft);color:var(--ok)}
+.tag-brand{background:var(--brand-soft);color:var(--brand)}
+.code{font-family:var(--f-mono);font-size:.78rem;color:var(--ink-3)}
+
+/* ---------- landing ---------- */
+.hero{display:grid;grid-template-columns:1.15fr .85fr;gap:2.5rem;align-items:center}
+@media (max-width:860px){.hero{grid-template-columns:1fr;gap:1.8rem}}
+.hero p.lead{font-size:1.08rem;color:var(--ink-2);max-width:56ch;margin-top:.9rem}
+.hero .cta{display:flex;gap:.6rem;flex-wrap:wrap;margin-top:1.4rem}
+.hero h1 em{font-style:normal;color:var(--brand)}
+.claim{display:grid;grid-template-columns:repeat(auto-fit,minmax(155px,1fr));gap:1rem 1.4rem;margin-top:1.8rem;padding-top:1.2rem;border-top:1px solid var(--line)}
+.claim b{font-family:var(--f-disp);font-size:1.5rem;display:block;line-height:1.1}
+
+/* the band: physical tag rendering */
+.band{background:var(--surface);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow);overflow:hidden}
+.band-top{background:var(--crit);color:var(--on-crit);padding:.55rem .9rem;display:flex;align-items:center;gap:.6rem;font-family:var(--f-disp);font-weight:700;letter-spacing:.06em;font-size:.86rem;text-transform:uppercase}
+.band-body{padding:.9rem}
+.band-row{display:flex;justify-content:space-between;gap:.8rem;padding:.42rem 0;border-bottom:1px dashed var(--line)}
+.band-row:last-child{border-bottom:0}
+.band-row span:first-child{font-family:var(--f-mono);font-size:.72rem;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-3);padding-top:.15rem}
+.band-row span:last-child{text-align:right;font-weight:600;font-size:.92rem}
+.nfc{display:flex;align-items:center;justify-content:center;gap:.5rem;padding:.6rem;background:var(--sunken);color:var(--ink-3);font-family:var(--f-mono);font-size:.72rem;letter-spacing:.08em;text-transform:uppercase}
+
+.steps{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:1.2rem;margin-top:1rem}
+.step{display:flex;gap:.8rem}
+.step .n{font-family:var(--f-mono);font-size:.78rem;font-weight:600;color:var(--brand);border:1px solid var(--brand);border-radius:50%;width:26px;height:26px;display:grid;place-items:center;flex:0 0 26px}
+.roles{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:1rem}
+.role{display:block;text-decoration:none;color:inherit;background:var(--surface);border:1px solid var(--line);border-left:3px solid var(--brand);border-radius:var(--r);padding:1.05rem;transition:border-color .15s,transform .15s}
+.role:hover{transform:translateY(-2px);border-color:var(--line-2);border-left-color:var(--brand-2)}
+.role.crit{border-left-color:var(--crit)}
+.role h3{margin-bottom:.3rem}
+.role p{color:var(--ink-2);font-size:.9rem}
+.role .go{margin-top:.7rem;font-size:.85rem;font-weight:600;color:var(--brand)}
+
+/* ---------- record rows ---------- */
+.rec{display:flex;gap:.75rem;padding:.7rem .9rem;border:1px solid var(--line);border-left:3px solid var(--line-2);border-radius:8px;background:var(--surface-2);align-items:flex-start}
+.rec + .rec{margin-top:.5rem}
+.rec.s4{border-left-color:var(--crit);border-left-width:5px}
+.rec.s3{border-left-color:var(--crit)}
+.rec.s2{border-left-color:var(--warn)}
+.rec.s1{border-left-color:var(--ok)}
+.rec .main{flex:1 1 auto;min-width:0}
+.rec .name{font-weight:600;display:flex;align-items:center;gap:.4rem;flex-wrap:wrap}
+.rec .meta{font-size:.85rem;color:var(--ink-2);margin-top:.1rem;overflow-wrap:anywhere}
+.rec .acts{display:flex;gap:.2rem;flex:0 0 auto}
+.empty{padding:1rem;border:1px dashed var(--line-2);border-radius:8px;color:var(--ink-3);font-size:.9rem;text-align:center}
+
+/* ---------- readout ---------- */
+.readout{border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--surface);box-shadow:var(--shadow)}
+.ro-head{background:var(--crit);color:var(--on-crit);padding:1rem 1.1rem;display:flex;gap:1rem;align-items:center;flex-wrap:wrap}
+.ro-head h2{color:var(--on-crit);flex:1 1 auto;font-size:1.4rem}
+.ro-blood{background:var(--on-crit);color:var(--crit);font-family:var(--f-disp);font-weight:700;font-size:1.5rem;line-height:1;padding:.45rem .7rem;border-radius:8px;text-align:center}
+.ro-blood small{display:block;font-family:var(--f-mono);font-size:.6rem;letter-spacing:.1em;font-weight:500}
+.ro-flags{display:flex;gap:.4rem;flex-wrap:wrap;padding:.6rem 1.1rem;background:var(--surface-2);border-bottom:1px solid var(--line)}
+.ro-sec{padding:.9rem 1.1rem;border-bottom:1px solid var(--line)}
+.ro-sec:last-child{border-bottom:0}
+.ro-sec > h4{font-family:var(--f-mono);font-size:.72rem;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-3);margin-bottom:.5rem;font-weight:500}
+.ro-foot{padding:.7rem 1.1rem;background:var(--sunken);font-size:.8rem;color:var(--ink-3);display:flex;justify-content:space-between;gap:.6rem;flex-wrap:wrap}
+.contacts{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:.5rem}
+.contact{border:1px solid var(--line);border-radius:8px;padding:.55rem .7rem;background:var(--surface-2)}
+.contact a{font-family:var(--f-mono);font-weight:600;font-size:1rem;text-decoration:none}
+
+/* ---------- tabs, logs, notices ---------- */
+.tabs{display:flex;gap:.15rem;overflow-x:auto;border-bottom:1px solid var(--line);padding:0 .5rem}
+.tabs button{background:none;border:0;border-bottom:2px solid transparent;color:var(--ink-2);font-family:var(--f-body);font-weight:600;font-size:.9rem;padding:.6rem .7rem;cursor:pointer;white-space:nowrap}
+.tabs button[aria-selected="true"]{color:var(--brand);border-bottom-color:var(--brand)}
+table{width:100%;border-collapse:collapse;font-size:.87rem}
+th{text-align:left;font-family:var(--f-mono);font-size:.7rem;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3);font-weight:500;padding:.4rem .5rem;border-bottom:1px solid var(--line)}
+td{padding:.45rem .5rem;border-bottom:1px solid var(--line);font-variant-numeric:tabular-nums}
+.scrollx{overflow-x:auto}
+.notice{display:flex;gap:.6rem;padding:.7rem .9rem;border-radius:8px;font-size:.88rem;border:1px solid var(--line);background:var(--surface-2);color:var(--ink-2)}
+.notice.warn{border-color:var(--warn);background:var(--warn-soft);color:var(--warn)}
+.notice.crit{border-color:var(--crit);background:var(--crit-soft);color:var(--crit)}
+.notice b{color:inherit}
+.gate{max-width:440px;margin-inline:auto}
+.toast{position:fixed;left:50%;bottom:1.4rem;transform:translateX(-50%);background:var(--ink);color:var(--ground);padding:.55rem 1rem;border-radius:8px;font-size:.9rem;font-weight:600;z-index:99;box-shadow:var(--shadow)}
+
+footer{border-top:1px solid var(--line);background:var(--surface);padding-block:1.6rem;margin-top:2rem}
+footer .wrap{display:flex;gap:1.2rem;justify-content:space-between;align-items:center;flex-wrap:wrap}
+.spacer-mark{font-family:var(--f-disp);font-weight:700;letter-spacing:.22em;font-size:1rem;color:var(--ink)}
+.spacer-mark i{font-style:normal;color:var(--spacer-red)}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+</style>
+</head>
+<body>
+<svg class="sr" aria-hidden="true"><defs>
+<symbol id="i-hero" viewBox="0 0 32 32">
+  <rect x="3.2" y="3.2" width="25.6" height="25.6" rx="7.5" fill="none" stroke="currentColor" stroke-width="2"/>
+  <path d="M8 17h3.4l1.8-4.4 2.6 8 2.2-5.2 1.3 1.6H24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+</symbol>
+<symbol id="i-nfc" viewBox="0 0 24 24">
+  <path d="M7 4.5a11 11 0 0 0 0 15M11 7.2a6 6 0 0 0 0 9.6M15 9.6a2.6 2.6 0 0 0 0 4.8" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+</symbol>
+</defs></svg>
+
+<header class="topbar">
+  <div class="wrap">
+    <a class="brand" href="#/">
+      <svg width="26" height="26" style="color:var(--crit)" aria-hidden="true"><use href="#i-hero"></use></svg>
+      <span>MediTag <span class="sub">HERO</span></span>
+    </a>
+    <nav class="nav" id="nav">
+      <a href="#/">Start</a>
+      <a href="#/karta">Moja karta</a>
+      <a href="#/odczyt">Odczyt ratunkowy</a>
+      <a href="#/lekarz">Panel lekarza</a>
+    </nav>
+    <span class="chip-mode" id="modeChip" title="Gdzie zapisywane są dane">…</span>
+  </div>
+</header>
+
+<main><div class="wrap" id="view"></div></main>
+
+<footer>
+  <div class="wrap">
+    <div>
+      <div class="spacer-mark">SPAC<i>ER</i></div>
+      <p class="tiny muted" style="margin-top:.25rem">Znak słowny odtworzony zastępczo — podmień na plik z repozytorium.</p>
+    </div>
+    <p class="tiny muted" style="max-width:46ch">HERO — Health Emergency Read Out. Prototyp interfejsu MediTag. Nie jest wyrobem medycznym i nie zastępuje wywiadu ratowniczego.</p>
+  </div>
+</footer>
+
+<script>
+(function(){
+"use strict";
+const view = document.getElementById("view");
+const modeChip = document.getElementById("modeChip");
+const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c] || c));
+const uid = () => Math.random().toString(36).slice(2, 9);
+const nowISO = () => new Date().toISOString();
+const fmtDT = iso => { try { return new Date(iso).toLocaleString("pl-PL", {dateStyle:"short", timeStyle:"short"}); } catch(e){ return iso || "—"; } };
+const fmtD = d => d ? d.split("-").reverse().join(".") : "—";
+const age = d => { if(!d) return null; const b = new Date(d), n = new Date(); let a = n.getFullYear()-b.getFullYear(); const m = n.getMonth()-b.getMonth(); if(m<0||(m===0&&n.getDate()<b.getDate())) a--; return a>=0&&a<130 ? a : null; };
+function toast(msg){ const t=document.createElement("div"); t.className="toast"; t.textContent=msg; document.body.appendChild(t); setTimeout(()=>t.remove(),2200); }
+
+/* ---------------- storage ---------------- */
+const LS = "hero.cards.v1";
+let API = false;      /* true, gdy odpowiada serwer HERO */
+let PIN_DG = null;    /* skrót PIN-u bieżącej sesji, wysyłany przy zapisie */
+const SEV = {1:"łagodna", 2:"umiarkowana", 3:"ciężka", 4:"anafilaksja"};
+
+async function digest(tagId, pin){
+  const raw = "hero:" + tagId + ":" + pin;
+  try {
+    const b = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(raw));
+    return Array.from(new Uint8Array(b)).map(x=>x.toString(16).padStart(2,"0")).join("");
+  } catch(e){
+    let h = 5381; for(let i=0;i<raw.length;i++) h = ((h*33) ^ raw.charCodeAt(i)) >>> 0;
+    return "fb" + h.toString(16);
+  }
+}
+function lsAll(){ try { return JSON.parse(localStorage.getItem(LS) || "{}"); } catch(e){ return {}; } }
+function lsSave(all){ try { localStorage.setItem(LS, JSON.stringify(all)); } catch(e){} }
+
+function blankCard(tagId){
+  return { tagId, pinHash:"", demo:false,
+    person:{ name:"", birthDate:"", blood:"", rh:"", weightKg:"", heightCm:"", langs:"", devices:"", dnr:false, donor:false, note:"" },
+    allergies:[], meds:[], conditions:[], contacts:[], reads:[],
+    updatedAt: nowISO(), updatedBy:"pacjent" };
+}
+function critical(card){
+  return {
+    tagId: card.tagId,
+    person: card.person,
+    allergies: card.allergies,
+    meds: card.meds,
+    conditions: (card.conditions||[]).filter(c => c.status !== "przebyta"),
+    contacts: card.contacts,
+    updatedAt: card.updatedAt, updatedBy: card.updatedBy
+  };
+}
+
+const api = path => "api/" + path;
+const store = {
+  /* zestaw jawny — to samo, co widzi ratownik; bez PIN-u i bez historii */
+  async get(tagId){
+    if(API){ const r = await fetch(api("cards/" + encodeURIComponent(tagId))); if(!r.ok) return null; return r.json(); }
+    return lsAll()[tagId] || null;
+  },
+  async list(){
+    if(API){ const r = await fetch(api("cards")); if(!r.ok) return []; return r.json(); }
+    return Object.values(lsAll()).map(c => ({tagId:c.tagId, name:c.person.name, demo:!!c.demo, updatedAt:c.updatedAt}));
+  },
+  /* pełna karta wraz z historią — wymaga PIN-u */
+  async openWithDigest(tagId, dg){
+    if(API){
+      const r = await fetch(api("cards/" + encodeURIComponent(tagId) + "/session"), {method:"POST", headers:{"content-type":"application/json"}, body: JSON.stringify({digest:dg})});
+      if(r.status === 404) return {ok:false, reason:"nieznany"};
+      if(!r.ok) return {ok:false, reason:"pin"};
+      PIN_DG = dg; return {ok:true, card: await r.json()};
+    }
+    const c = lsAll()[tagId];
+    if(!c) return {ok:false, reason:"nieznany"};
+    if(c.pinHash && c.pinHash !== dg) return {ok:false, reason:"pin"};
+    PIN_DG = dg; return {ok:true, card:c};
+  },
+  async verify(tagId, pin){ return this.openWithDigest(tagId, await digest(tagId, pin)); },
+  async save(card){
+    card.updatedAt = nowISO();
+    if(API){
+      const r = await fetch(api("cards/" + encodeURIComponent(card.tagId)), {method:"PUT",
+        headers:{"content-type":"application/json", "x-hero-pin": PIN_DG || ""}, body: JSON.stringify(card)});
+      if(!r.ok) throw new Error("Serwer odrzucił zapis (" + r.status + ")");
+      return card;
+    }
+    const all = lsAll(); all[card.tagId] = card; lsSave(all); return card;
+  },
+  async remove(tagId){
+    if(API){ await fetch(api("cards/" + encodeURIComponent(tagId)), {method:"DELETE", headers:{"x-hero-pin": PIN_DG || ""}}); return; }
+    const all = lsAll(); delete all[tagId]; lsSave(all);
+  },
+  async logRead(tagId, by, ctx){
+    const payload = {by: by || "nieznany czytnik", ctx: ctx || "odczyt ratunkowy"};
+    if(API){
+      const r = await fetch(api("cards/" + encodeURIComponent(tagId) + "/reads"), {method:"POST", headers:{"content-type":"application/json"}, body: JSON.stringify(payload)});
+      if(r.ok) return r.json();
+      return Object.assign({id:uid(), at:nowISO()}, payload);
+    }
+    const entry = Object.assign({id:uid(), at:nowISO()}, payload);
+    const all = lsAll(); const c = all[tagId]; if(!c) return entry;
+    c.reads = [entry].concat(c.reads || []).slice(0, 50); lsSave(all); return entry;
+  }
+};
+
+/* example card, used only to give the prototype something real to show */
+async function ensureExample(){
+  const all = lsAll();
+  if(Object.keys(all).length) return;
+  const c = blankCard("HERO-2481-KX");
+  c.demo = true;
+  c.pinHash = await digest(c.tagId, "1234");
+  c.person = { name:"Anna Wiśniewska", birthDate:"1968-03-14", blood:"A", rh:"+", weightKg:"72", heightCm:"165",
+    langs:"pl, en", devices:"Stymulator serca Medtronic, wszczepiony 2021 — nie stosować diatermii jednobiegunowej",
+    dnr:false, donor:true, note:"Trudny dostęp dożylny — preferowana prawa kończyna górna." };
+  c.allergies = [
+    {id:uid(), allergen:"Penicylina", kind:"lek", reaction:"Obrzęk krtani, spadek ciśnienia", severity:4, source:"lekarz", note:"Potwierdzone testami 2019"},
+    {id:uid(), allergen:"Jad osy", kind:"inne", reaction:"Wstrząs anafilaktyczny", severity:4, source:"pacjent", note:"Nosi adrenalinę w ampułko-strzykawce"},
+    {id:uid(), allergen:"Orzechy ziemne", kind:"pokarm", reaction:"Pokrzywka, duszność", severity:3, source:"pacjent", note:""}
+  ];
+  c.meds = [
+    {id:uid(), name:"Rywaroksaban", atc:"B01AF01", dose:"20 mg", freq:"1× dziennie, wieczorem", route:"doustnie", since:"2021-06", anticoag:true, source:"lekarz", note:"Migotanie przedsionków"},
+    {id:uid(), name:"Metformina", atc:"A10BA02", dose:"1000 mg", freq:"2× dziennie", route:"doustnie", since:"2016-02", anticoag:false, source:"lekarz", note:""},
+    {id:uid(), name:"Lewotyroksyna", atc:"H03AA01", dose:"75 µg", freq:"rano na czczo", route:"doustnie", since:"2014-11", anticoag:false, source:"pacjent", note:""}
+  ];
+  c.conditions = [
+    {id:uid(), name:"Migotanie przedsionków", icd10:"I48", since:"2021", status:"aktywna", source:"lekarz", note:"Utrwalone, kontrola rytmu"},
+    {id:uid(), name:"Cukrzyca typu 2", icd10:"E11", since:"2016", status:"kontrolowana", source:"lekarz", note:"HbA1c 6,8%"},
+    {id:uid(), name:"Niedoczynność tarczycy", icd10:"E03", since:"2014", status:"kontrolowana", source:"pacjent", note:""}
+  ];
+  c.contacts = [
+    {id:uid(), name:"Marek Wiśniewski", relation:"mąż", phone:"+48 601 234 567", primary:true},
+    {id:uid(), name:"dr Tomasz Lewandowski", relation:"lekarz prowadzący, kardiolog", phone:"+48 22 555 12 34", primary:false}
+  ];
+  c.updatedBy = "przykład";
+  const map = {}; map[c.tagId] = c; lsSave(map);
+}
+
+/* ---------------- session ---------------- */
+const ses = {
+  get(){ try { return JSON.parse(sessionStorage.getItem("hero.session") || "null"); } catch(e){ return null; } },
+  set(v){ try { sessionStorage.setItem("hero.session", JSON.stringify(v)); } catch(e){} },
+  clear(){ try { sessionStorage.removeItem("hero.session"); } catch(e){} }
+};
+
+/* ---------------- shared render helpers ---------------- */
+function sevTag(s){ const n = Number(s)||1; return '<span class="tag ' + (n>=3?"tag-crit":n===2?"tag-warn":"tag-ok") + '">' + esc(SEV[n]) + "</span>"; }
+function srcTag(src){ return src === "lekarz" ? '<span class="tag tag-brand">zweryfikowane przez lekarza</span>' : '<span class="tag">wpis pacjenta</span>'; }
+
+function allergyRow(a){
+  const n = Number(a.severity)||1;
+  return '<div class="rec s'+n+'" data-id="'+esc(a.id)+'">'
+    + '<div class="main"><div class="name">'+esc(a.allergen)+' '+sevTag(n)+'<span class="tag">'+esc(a.kind)+'</span>'+srcTag(a.source)+'</div>'
+    + '<div class="meta">'+esc(a.reaction || "Reakcja nieopisana")+(a.note?' · '+esc(a.note):"")+'</div></div>'
+    + '<div class="acts"><button class="btn btn-ghost btn-sm" data-act="edit">Edytuj</button><button class="btn btn-ghost btn-sm" data-act="del">Usuń</button></div></div>';
+}
+function medRow(m){
+  return '<div class="rec '+(m.anticoag?"s3":"")+'" data-id="'+esc(m.id)+'">'
+    + '<div class="main"><div class="name">'+esc(m.name)+(m.anticoag?' <span class="tag tag-crit">antykoagulant</span>':"")+srcTag(m.source)+'</div>'
+    + '<div class="meta">'+esc([m.dose, m.freq, m.route].filter(Boolean).join(" · ") || "dawkowanie nieokreślone")
+    + (m.atc?' <span class="code">ATC '+esc(m.atc)+'</span>':"")+(m.since?' · od '+esc(m.since):"")+(m.note?' · '+esc(m.note):"")+'</div></div>'
+    + '<div class="acts"><button class="btn btn-ghost btn-sm" data-act="edit">Edytuj</button><button class="btn btn-ghost btn-sm" data-act="del">Usuń</button></div></div>';
+}
+function condRow(c){
+  const cls = c.status === "aktywna" ? "s2" : c.status === "przebyta" ? "" : "s1";
+  return '<div class="rec '+cls+'" data-id="'+esc(c.id)+'">'
+    + '<div class="main"><div class="name">'+esc(c.name)+' <span class="tag">'+esc(c.status)+'</span>'+srcTag(c.source)+'</div>'
+    + '<div class="meta">'+(c.icd10?'<span class="code">ICD-10 '+esc(c.icd10)+'</span>':"")+(c.since?' · rozpoznanie '+esc(c.since):"")+(c.note?' · '+esc(c.note):"")+'</div></div>'
+    + '<div class="acts"><button class="btn btn-ghost btn-sm" data-act="edit">Edytuj</button><button class="btn btn-ghost btn-sm" data-act="del">Usuń</button></div></div>';
+}
+function contactRow(k){
+  return '<div class="rec '+(k.primary?"s1":"")+'" data-id="'+esc(k.id)+'">'
+    + '<div class="main"><div class="name">'+esc(k.name)+(k.primary?' <span class="tag tag-ok">kontakt pierwszy</span>':"")+'</div>'
+    + '<div class="meta">'+esc(k.relation||"—")+' · <a href="tel:'+esc((k.phone||"").replace(/\s/g,""))+'">'+esc(k.phone)+'</a></div></div>'
+    + '<div class="acts"><button class="btn btn-ghost btn-sm" data-act="edit">Edytuj</button><button class="btn btn-ghost btn-sm" data-act="del">Usuń</button></div></div>';
+}
+
+/* ---------------- start ---------------- */
+async function renderStart(){
+  const cards = await store.list();
+  const demo = cards.find(c => c.demo) || cards[0];
+  view.innerHTML = ''
+  + '<section class="hero">'
+  +   '<div>'
+  +     '<p class="eyebrow">Health Emergency Read Out</p>'
+  +     '<h1>Karta pacjenta, którą ratownik otwiera <em>jednym zbliżeniem</em>.</h1>'
+  +     '<p class="lead">MediTag to wodoodporna opaska NFC. HERO to platforma, w której pacjent i lekarz prowadzą jedną kartę: alergie, przyjmowane leki, choroby przewlekłe, grupę krwi i kontakty alarmowe. Odczyt ratunkowy działa bez logowania — także wtedy, gdy pacjent jest nieprzytomny.</p>'
+  +     '<div class="cta"><a class="btn btn-primary" href="#/karta">Załóż kartę</a><a class="btn" href="#/odczyt">Wykonaj odczyt ratunkowy</a></div>'
+  +     '<div class="claim">'
+  +       '<div><b>Bez logowania</b><span class="tiny muted">odczyt ratunkowy nie wymaga konta</span></div>'
+  +       '<div><b>Bez aplikacji</b><span class="tiny muted">telefon z NFC otwiera stronę karty</span></div>'
+  +       '<div><b>Z audytem</b><span class="tiny muted">każdy odczyt trafia do historii karty</span></div>'
+  +     '</div>'
+  +   '</div>'
+  +   '<div class="band" aria-label="Podgląd karty na opasce">'
+  +     '<div class="band-top"><svg width="16" height="16" aria-hidden="true"><use href="#i-nfc"></use></svg>Karta ratunkowa</div>'
+  +     '<div class="band-body">'
+  +       '<div class="band-row"><span>Grupa krwi</span><span>A RhD+</span></div>'
+  +       '<div class="band-row"><span>Alergie</span><span style="color:var(--crit)">Penicylina — anafilaksja</span></div>'
+  +       '<div class="band-row"><span>Leki</span><span>Rywaroksaban 20 mg <span class="tag tag-crit">antykoagulant</span></span></div>'
+  +       '<div class="band-row"><span>Choroby</span><span>Migotanie przedsionków (I48)</span></div>'
+  +       '<div class="band-row"><span>Kontakt</span><span class="mono">+48 601 234 567</span></div>'
+  +     '</div>'
+  +     '<div class="nfc"><svg width="14" height="14" aria-hidden="true"><use href="#i-nfc"></use></svg> Zbliż telefon do opaski</div>'
+  +   '</div>'
+  + '</section>'
+
+  + '<section style="margin-top:2.6rem">'
+  +   '<h2>Jak przebiega zdarzenie</h2>'
+  +   '<div class="steps">'
+  +     '<div class="step"><span class="n">1</span><div><h3>Pacjent prowadzi kartę</h3><p class="small muted">Sam albo razem z lekarzem wpisuje alergie, leki i choroby. Wpisy lekarza są oznaczone jako zweryfikowane.</p></div></div>'
+  +     '<div class="step"><span class="n">2</span><div><h3>Opaska nosi identyfikator</h3><p class="small muted">Tag NFC zawiera wyłącznie adres karty — żadnych danych medycznych w pamięci opaski.</p></div></div>'
+  +     '<div class="step"><span class="n">3</span><div><h3>Ratownik odczytuje</h3><p class="small muted">Zbliżenie telefonu otwiera zestaw krytyczny w kolejności istotnej na miejscu zdarzenia. Odczyt jest logowany.</p></div></div>'
+  +   '</div>'
+  + '</section>'
+
+  + '<section style="margin-top:2.6rem"><h2>Wejdź jako</h2><p class="muted small" style="margin:.3rem 0 1rem">Trzy role, trzy różne zakresy dostępu do tej samej karty.</p>'
+  +   '<div class="roles">'
+  +     '<a class="role" href="#/karta"><h3>Pacjent</h3><p>Zakładasz kartę, ustawiasz PIN i decydujesz, co widzi ratownik. Możesz kartę usunąć w każdej chwili.</p><div class="go">Moja karta →</div></a>'
+  +     '<a class="role" href="#/lekarz"><h3>Lekarz</h3><p>Otwierasz kartę pacjenta jego kodem dostępu i uzupełniasz rozpoznania, leki i alergie. Twoje wpisy są podpisane.</p><div class="go">Panel lekarza →</div></a>'
+  +     '<a class="role crit" href="#/odczyt"><h3>Ratownik</h3><p>Sam identyfikator opaski, bez hasła. Zestaw krytyczny: alergie, antykoagulanty, choroby, kontakt alarmowy.</p><div class="go">Odczyt ratunkowy →</div></a>'
+  +   '</div>'
+  + '</section>'
+
+  + '<section style="margin-top:2.6rem"><h2>Karty zapisane tutaj</h2>'
+  +   '<div class="panel" style="margin-top:.8rem"><div class="panel-b">'
+  +   (cards.length
+      ? '<div class="scrollx"><table><thead><tr><th>Identyfikator</th><th>Pacjent</th><th>Ostatnia zmiana</th><th></th></tr></thead><tbody>'
+        + cards.map(c => '<tr><td class="mono">'+esc(c.tagId)+(c.demo?' <span class="tag">przykład</span>':"")+'</td><td>'+esc(c.name||"—")+'</td><td>'+esc(fmtDT(c.updatedAt))+'</td><td style="text-align:right"><a class="btn btn-sm" href="#/odczyt?tag='+encodeURIComponent(c.tagId)+'">Odczytaj</a></td></tr>').join("")
+        + '</tbody></table></div>'
+      : '<div class="empty">Nie ma jeszcze żadnej karty. Zacznij od „Załóż kartę”.</div>')
+  +   '</div></div>'
+  + '</section>';
+}
+
+/* ---------------- emergency read-out ---------------- */
+function readoutHTML(card, entry){
+  const p = card.person || {};
+  const a = age(p.birthDate);
+  const anaph = (card.allergies||[]).filter(x => Number(x.severity) >= 3);
+  const anticoag = (card.meds||[]).filter(m => m.anticoag);
+  const flags = []
+    .concat(anaph.map(x => '<span class="tag tag-crit">Anafilaksja: '+esc(x.allergen)+'</span>'))
+    .concat(anticoag.length ? ['<span class="tag tag-crit">Antykoagulant: '+esc(anticoag.map(m=>m.name).join(", "))+'</span>'] : [])
+    .concat(p.devices ? ['<span class="tag tag-warn">Wszczep / urządzenie</span>'] : [])
+    .concat(p.dnr ? ['<span class="tag tag-crit">DNR — zgłoszone oświadczenie</span>'] : [])
+    .concat(p.donor ? ['<span class="tag tag-ok">Dawca narządów</span>'] : []);
+
+  return '<div class="readout">'
+  + '<div class="ro-head">'
+  +   '<div><p class="eyebrow" style="color:var(--on-crit);opacity:.75">Odczyt ratunkowy · MediTag HERO</p><h2>'+esc(p.name || "Pacjent nieznany")+'</h2>'
+  +   '<p class="small" style="color:var(--on-crit);opacity:.9">'+esc(fmtD(p.birthDate))+(a!==null?' · '+a+' lat':"")+(p.weightKg?' · '+esc(p.weightKg)+' kg':"")+'</p></div>'
+  +   '<div class="ro-blood">'+esc((p.blood||"?") + (p.rh||""))+'<small>grupa krwi</small></div>'
+  + '</div>'
+  + (flags.length ? '<div class="ro-flags">'+flags.join("")+'</div>' : "")
+  + '<div class="ro-sec"><h4>Alergie i nadwrażliwości</h4>'
+  +   ((card.allergies||[]).length ? (card.allergies||[]).slice().sort((x,y)=>y.severity-x.severity).map(allergyRowRO).join("") : '<p class="small muted">Nie zgłoszono żadnej alergii.</p>')
+  + '</div>'
+  + '<div class="ro-sec"><h4>Przyjmowane leki</h4>'
+  +   ((card.meds||[]).length ? (card.meds||[]).slice().sort((x,y)=>(y.anticoag?1:0)-(x.anticoag?1:0)).map(medRowRO).join("") : '<p class="small muted">Nie zgłoszono leków.</p>')
+  + '</div>'
+  + '<div class="ro-sec"><h4>Choroby przewlekłe</h4>'
+  +   ((card.conditions||[]).length ? (card.conditions||[]).map(condRowRO).join("") : '<p class="small muted">Nie zgłoszono chorób przewlekłych.</p>')
+  + '</div>'
+  + (p.devices || p.note ? '<div class="ro-sec"><h4>Uwagi istotne dla zespołu</h4><p class="small">'+esc([p.devices, p.note].filter(Boolean).join(" · "))+'</p></div>' : "")
+  + '<div class="ro-sec"><h4>Kontakty alarmowe</h4><div class="contacts">'
+  +   ((card.contacts||[]).length ? (card.contacts||[]).map(k => '<div class="contact"><div class="small" style="font-weight:600">'+esc(k.name)+(k.primary?' <span class="tag tag-ok">pierwszy</span>':"")+'</div><div class="tiny muted">'+esc(k.relation||"")+'</div><a href="tel:'+esc((k.phone||"").replace(/\s/g,""))+'">'+esc(k.phone)+'</a></div>').join("") : '<p class="small muted">Brak kontaktów alarmowych.</p>')
+  + '</div></div>'
+  + '<div class="ro-foot"><span>Karta <span class="mono">'+esc(card.tagId)+'</span> · aktualizacja '+esc(fmtDT(card.updatedAt))+' ('+esc(card.updatedBy||"pacjent")+')</span>'
+  +   '<span>Odczyt zapisany: '+esc(fmtDT(entry.at))+' · '+esc(entry.by)+'</span></div>'
+  + '</div>';
+}
+function allergyRowRO(a){
+  const n = Number(a.severity)||1;
+  return '<div class="rec s'+n+'"><div class="main"><div class="name">'+esc(a.allergen)+' '+sevTag(n)+'<span class="tag">'+esc(a.kind)+'</span></div><div class="meta">'+esc(a.reaction||"reakcja nieopisana")+(a.note?' · '+esc(a.note):"")+'</div></div></div>';
+}
+function medRowRO(m){
+  return '<div class="rec '+(m.anticoag?"s3":"")+'"><div class="main"><div class="name">'+esc(m.name)+(m.anticoag?' <span class="tag tag-crit">antykoagulant</span>':"")+'</div><div class="meta">'+esc([m.dose,m.freq,m.route].filter(Boolean).join(" · "))+(m.atc?' <span class="code">ATC '+esc(m.atc)+'</span>':"")+'</div></div></div>';
+}
+function condRowRO(c){
+  return '<div class="rec '+(c.status==="aktywna"?"s2":"s1")+'"><div class="main"><div class="name">'+esc(c.name)+' <span class="tag">'+esc(c.status)+'</span></div><div class="meta">'+(c.icd10?'<span class="code">ICD-10 '+esc(c.icd10)+'</span>':"")+(c.note?' · '+esc(c.note):"")+'</div></div></div>';
+}
+function handoverText(card){
+  const p = card.person||{}, a = age(p.birthDate);
+  const L = [];
+  L.push("MediTag HERO — karta " + card.tagId);
+  L.push("Pacjent: " + (p.name||"nieznany") + (a!==null?", "+a+" lat":"") + (p.blood?", grupa "+p.blood+(p.rh||""):""));
+  L.push("Alergie: " + ((card.allergies||[]).map(x=>x.allergen+" ("+SEV[Number(x.severity)||1]+")").join("; ") || "brak zgłoszonych"));
+  L.push("Leki: " + ((card.meds||[]).map(m=>m.name+" "+(m.dose||"")+(m.anticoag?" [ANTYKOAGULANT]":"")).join("; ") || "brak zgłoszonych"));
+  L.push("Choroby: " + ((card.conditions||[]).map(c=>c.name+(c.icd10?" ("+c.icd10+")":"")).join("; ") || "brak zgłoszonych"));
+  if(p.devices) L.push("Wszczepy/urządzenia: " + p.devices);
+  if(p.dnr) L.push("UWAGA: zgłoszone oświadczenie DNR");
+  const k = (card.contacts||[]).find(x=>x.primary) || (card.contacts||[])[0];
+  if(k) L.push("Kontakt: " + k.name + " (" + (k.relation||"") + ") " + k.phone);
+  return L.join("\n");
+}
+
+async function renderScan(params){
+  const pre = params.get("tag") || "";
+  view.innerHTML = '<div class="stack" style="max-width:760px;margin-inline:auto">'
+  + '<div><p class="eyebrow">Rola: ratownik</p><h1 style="font-size:2rem">Odczyt ratunkowy</h1>'
+  + '<p class="muted" style="margin-top:.5rem">W realnym urządzeniu ten ekran otwiera się po zbliżeniu telefonu do opaski. Tutaj wpisz identyfikator karty ręcznie.</p></div>'
+  + '<div class="panel"><div class="panel-b"><form id="scanForm" class="row">'
+  +   '<label class="f" style="flex:2 1 220px">Identyfikator opaski<input class="mono" name="tag" placeholder="HERO-0000-XX" value="'+esc(pre)+'" required></label>'
+  +   '<label class="f" style="flex:1 1 160px">Kto odczytuje<input name="by" placeholder="ZRM P-12 / SOR"></label>'
+  +   '<button class="btn btn-crit" type="submit">Odczytaj kartę</button>'
+  + '</form><p class="tiny muted" style="margin-top:.6rem">Odczyt nie wymaga PIN-u i zostaje zapisany w historii karty wraz z podanym opisem czytnika.</p></div></div>'
+  + '<div id="scanOut"></div></div>';
+
+  const out = document.getElementById("scanOut");
+  const form = document.getElementById("scanForm");
+  form.addEventListener("submit", async e => {
+    e.preventDefault();
+    const tag = form.tag.value.trim().toUpperCase();
+    const by = form.by.value.trim() || "czytnik nieopisany";
+    const card = await store.get(tag);
+    if(!card){ out.innerHTML = '<div class="notice crit"><span>Nie znaleziono karty <b class="mono">'+esc(tag)+'</b>. Sprawdź identyfikator albo załóż kartę w zakładce „Moja karta”.</span></div>'; return; }
+    const entry = await store.logRead(tag, by, "odczyt ratunkowy");
+    out.innerHTML = readoutHTML(critical(card), entry)
+      + '<div class="row" style="margin-top:.8rem"><button class="btn btn-sm" id="copyHand">Skopiuj podsumowanie do przekazania</button></div>';
+    document.getElementById("copyHand").addEventListener("click", async () => {
+      try { await navigator.clipboard.writeText(handoverText(card)); toast("Podsumowanie skopiowane"); }
+      catch(err){ toast("Przeglądarka zablokowała schowek"); }
+    });
+    out.scrollIntoView({behavior:"smooth", block:"start"});
+  });
+  if(pre) form.dispatchEvent(new Event("submit"));
+}
+
+/* ---------------- card editor ---------------- */
+let CARD = null, ROLE = "pacjent", TAB = "podstawowe", EDIT = {};
+const TABS = [["podstawowe","Dane podstawowe"],["alergie","Alergie"],["leki","Leki"],["choroby","Choroby"],["kontakty","Kontakty"],["historia","Historia odczytów"]];
+const ROUTES = ["doustnie","podskórnie","dożylnie","domięśniowo","wziewnie","przezskórnie","inne"];
+function opt(list, cur){ return list.map(v => '<option value="'+esc(v)+'"'+(String(cur)===String(v)?" selected":"")+'>'+esc(v)+'</option>').join(""); }
+function genTag(){ const d = String(Math.floor(1000+Math.random()*9000)); const A = "ABCDEFGHJKLMNPRSTUWXZ"; return "HERO-"+d+"-"+A[Math.floor(Math.random()*A.length)]+A[Math.floor(Math.random()*A.length)]; }
+
+function renderEditor(){
+  const p = CARD.person || {};
+  const isDoc = ROLE === "lekarz";
+  view.innerHTML = '<div class="stack">'
+  + '<div class="panel"><div class="panel-h">'
+  +   '<div><p class="eyebrow">'+(isDoc ? "Rola: lekarz — wpisy podpisane jako zweryfikowane" : "Rola: pacjent")+'</p>'
+  +   '<h3>'+esc(p.name || "Karta bez nazwiska")+' <span class="mono tiny muted">'+esc(CARD.tagId)+'</span></h3>'
+  +   '<p class="tiny muted">Ostatnia zmiana: '+esc(fmtDT(CARD.updatedAt))+' · '+esc(CARD.updatedBy||"pacjent")+'</p></div>'
+  +   '<div class="row" style="margin-left:auto">'
+  +     '<a class="btn btn-sm" href="#/odczyt?tag='+encodeURIComponent(CARD.tagId)+'">Podgląd odczytu</a>'
+  +     (isDoc ? "" : '<button class="btn btn-sm" id="delCard">Usuń kartę</button>')
+  +     '<button class="btn btn-sm" id="logout">Zamknij</button>'
+  +   '</div>'
+  + '</div>'
+  + '<div class="tabs" role="tablist">' + TABS.map(([k,l]) => '<button role="tab" data-tab="'+k+'" aria-selected="'+(TAB===k)+'">'+esc(l)+'</button>').join("") + '</div>'
+  + '<div class="panel-b" id="tabBody"></div></div></div>';
+
+  view.querySelectorAll("[data-tab]").forEach(b => b.addEventListener("click", () => { TAB = b.dataset.tab; EDIT = {}; renderEditor(); }));
+  const lo = document.getElementById("logout");
+  if(lo) lo.addEventListener("click", () => { ses.clear(); CARD = null; location.hash = "#/"; });
+  const dc = document.getElementById("delCard");
+  if(dc) dc.addEventListener("click", async () => {
+    if(!confirm("Usunąć kartę " + CARD.tagId + " wraz z historią odczytów? Operacji nie da się cofnąć.")) return;
+    await store.remove(CARD.tagId); ses.clear(); CARD = null; toast("Karta usunięta"); location.hash = "#/";
+  });
+  renderTab();
+}
+
+async function persist(){
+  CARD.updatedBy = ROLE;
+  await store.save(CARD);
+}
+
+async function renderTab(){
+  const b = document.getElementById("tabBody");
+  const src = ROLE === "lekarz" ? "lekarz" : "pacjent";
+  const p = CARD.person || {};
+
+  if(TAB === "podstawowe"){
+    b.innerHTML = '<form id="fBasic" class="stack">'
+    + '<div class="grid g2">'
+    +   '<label class="f">Imię i nazwisko<input name="name" value="'+esc(p.name)+'" placeholder="Jan Kowalski"></label>'
+    +   '<label class="f">Data urodzenia<input type="date" name="birthDate" value="'+esc(p.birthDate)+'"></label>'
+    + '</div>'
+    + '<div class="grid g3">'
+    +   '<label class="f">Grupa krwi<select name="blood"><option value="">—</option>'+opt(["0","A","B","AB"], p.blood)+'</select></label>'
+    +   '<label class="f">RhD<select name="rh"><option value="">—</option>'+opt(["+","-"], p.rh)+'</select></label>'
+    +   '<label class="f">Masa ciała (kg)<input name="weightKg" inputmode="numeric" value="'+esc(p.weightKg)+'"></label>'
+    +   '<label class="f">Wzrost (cm)<input name="heightCm" inputmode="numeric" value="'+esc(p.heightCm)+'"></label>'
+    + '</div>'
+    + '<label class="f">Języki kontaktu<input name="langs" value="'+esc(p.langs)+'" placeholder="pl, en"></label>'
+    + '<label class="f">Wszczepy i urządzenia<textarea name="devices" placeholder="np. stymulator serca, pompa insulinowa, zastawka mechaniczna">'+esc(p.devices)+'</textarea></label>'
+    + '<label class="f">Uwagi dla zespołu ratunkowego<textarea name="note" placeholder="np. trudny dostęp dożylny, niepełnosprawność, opieka nad dzieckiem">'+esc(p.note)+'</textarea></label>'
+    + '<div class="row"><label class="check"><input type="checkbox" name="donor"'+(p.donor?" checked":"")+'> Zgoda na pobranie narządów</label>'
+    +   '<label class="check"><input type="checkbox" name="dnr"'+(p.dnr?" checked":"")+'> Zgłoszone oświadczenie DNR</label></div>'
+    + '<div class="row"><button class="btn btn-primary" type="submit">Zapisz dane podstawowe</button></div></form>';
+    document.getElementById("fBasic").addEventListener("submit", async e => {
+      e.preventDefault(); const f = e.target;
+      CARD.person = { name:f.name.value.trim(), birthDate:f.birthDate.value, blood:f.blood.value, rh:f.rh.value,
+        weightKg:f.weightKg.value.trim(), heightCm:f.heightCm.value.trim(), langs:f.langs.value.trim(),
+        devices:f.devices.value.trim(), note:f.note.value.trim(), donor:f.donor.checked, dnr:f.dnr.checked };
+      await persist(); toast("Zapisano"); renderEditor();
+    });
+    return;
+  }
+
+  if(TAB === "historia"){
+    if(PIN_DG){ const fresh = await store.openWithDigest(CARD.tagId, PIN_DG); if(fresh.ok) CARD.reads = fresh.card.reads || []; }
+    const reads = CARD.reads || [];
+    b.innerHTML = '<div class="row" style="justify-content:space-between;margin-bottom:.8rem"><p class="small muted" style="flex:1 1 260px">Każde otwarcie karty w trybie ratunkowym zostawia ślad. Historia jest widoczna dla pacjenta i lekarza z dostępem.</p>'
+    + '<button class="btn btn-sm" id="reloadReads">Odśwież</button></div>'
+    + (reads.length
+      ? '<div class="scrollx"><table><thead><tr><th>Kiedy</th><th>Kto</th><th>Kontekst</th></tr></thead><tbody>'
+        + reads.map(r => '<tr><td class="mono">'+esc(fmtDT(r.at))+'</td><td>'+esc(r.by)+'</td><td>'+esc(r.ctx)+'</td></tr>').join("")
+        + '</tbody></table></div>'
+      : '<div class="empty">Karta nie była jeszcze odczytywana.</div>');
+    document.getElementById("reloadReads").addEventListener("click", () => renderTab());
+    return;
+  }
+
+  const cfg = {
+    alergie: { key:"allergies", row:allergyRow, title:"Dodaj alergię",
+      form: e => '<div class="grid g2">'
+        + '<label class="f">Alergen<input name="allergen" required value="'+esc(e.allergen)+'" placeholder="np. penicylina, jad osy, orzechy"></label>'
+        + '<label class="f">Rodzaj<select name="kind">'+opt(["lek","pokarm","inne"], e.kind||"lek")+'</select></label>'
+        + '<label class="f">Reakcja<input name="reaction" value="'+esc(e.reaction)+'" placeholder="np. obrzęk krtani, pokrzywka"></label>'
+        + '<label class="f">Nasilenie<select name="severity">'+[1,2,3,4].map(n=>'<option value="'+n+'"'+(Number(e.severity||2)===n?" selected":"")+'>'+n+" — "+SEV[n]+'</option>').join("")+'</select></label>'
+        + '</div><label class="f">Uwagi<input name="note" value="'+esc(e.note)+'" placeholder="np. potwierdzone testami, nosi adrenalinę"></label>',
+      read: f => ({allergen:f.allergen.value.trim(), kind:f.kind.value, reaction:f.reaction.value.trim(), severity:Number(f.severity.value), note:f.note.value.trim()}) },
+    leki: { key:"meds", row:medRow, title:"Dodaj lek",
+      form: e => '<div class="grid g2">'
+        + '<label class="f">Nazwa leku<input name="name" required value="'+esc(e.name)+'" placeholder="np. rywaroksaban"></label>'
+        + '<label class="f">Kod ATC<input class="mono" name="atc" value="'+esc(e.atc)+'" placeholder="B01AF01"></label>'
+        + '<label class="f">Dawka<input name="dose" value="'+esc(e.dose)+'" placeholder="20 mg"></label>'
+        + '<label class="f">Częstość<input name="freq" value="'+esc(e.freq)+'" placeholder="1× dziennie, wieczorem"></label>'
+        + '<label class="f">Droga podania<select name="route">'+opt(ROUTES, e.route||"doustnie")+'</select></label>'
+        + '<label class="f">Przyjmuje od<input name="since" value="'+esc(e.since)+'" placeholder="2021-06"></label>'
+        + '</div><label class="f">Uwagi<input name="note" value="'+esc(e.note)+'" placeholder="np. wskazanie, uwagi o odstawieniu"></label>'
+        + '<label class="check" style="margin-top:.5rem"><input type="checkbox" name="anticoag"'+(e.anticoag?" checked":"")+'> Lek przeciwkrzepliwy lub przeciwpłytkowy (wyróżniany w odczycie ratunkowym)</label>',
+      read: f => ({name:f.name.value.trim(), atc:f.atc.value.trim().toUpperCase(), dose:f.dose.value.trim(), freq:f.freq.value.trim(), route:f.route.value, since:f.since.value.trim(), anticoag:f.anticoag.checked, note:f.note.value.trim()}) },
+    choroby: { key:"conditions", row:condRow, title:"Dodaj chorobę lub rozpoznanie",
+      form: e => '<div class="grid g2">'
+        + '<label class="f">Rozpoznanie<input name="name" required value="'+esc(e.name)+'" placeholder="np. migotanie przedsionków"></label>'
+        + '<label class="f">Kod ICD-10<input class="mono" name="icd10" value="'+esc(e.icd10)+'" placeholder="I48"></label>'
+        + '<label class="f">Od kiedy<input name="since" value="'+esc(e.since)+'" placeholder="2021"></label>'
+        + '<label class="f">Status<select name="status">'+opt(["aktywna","kontrolowana","przebyta"], e.status||"aktywna")+'</select></label>'
+        + '</div><label class="f">Uwagi<input name="note" value="'+esc(e.note)+'" placeholder="np. leczenie, wyniki kontrolne"></label>',
+      read: f => ({name:f.name.value.trim(), icd10:f.icd10.value.trim().toUpperCase(), since:f.since.value.trim(), status:f.status.value, note:f.note.value.trim()}) },
+    kontakty: { key:"contacts", row:contactRow, title:"Dodaj kontakt alarmowy",
+      form: e => '<div class="grid g2">'
+        + '<label class="f">Imię i nazwisko<input name="name" required value="'+esc(e.name)+'" placeholder="np. Marek Wiśniewski"></label>'
+        + '<label class="f">Relacja<input name="relation" value="'+esc(e.relation)+'" placeholder="mąż, córka, lekarz prowadzący"></label>'
+        + '<label class="f">Telefon<input class="mono" name="phone" required value="'+esc(e.phone)+'" placeholder="+48 600 000 000"></label>'
+        + '</div><label class="check" style="margin-top:.5rem"><input type="checkbox" name="primary"'+(e.primary?" checked":"")+'> Kontakt pierwszego wyboru</label>',
+      read: f => ({name:f.name.value.trim(), relation:f.relation.value.trim(), phone:f.phone.value.trim(), primary:f.primary.checked}) }
+  }[TAB];
+
+  const list = CARD[cfg.key] || [];
+  const editing = EDIT[cfg.key] ? list.find(x => x.id === EDIT[cfg.key]) : null;
+  const draft = editing || {};
+  b.innerHTML = '<div id="rows" data-kind="'+cfg.key+'">' + (list.length ? list.map(cfg.row).join("") : '<div class="empty">Brak wpisów w tej sekcji.</div>') + '</div>'
+    + '<form id="fEntry" style="margin-top:1.1rem;border-top:1px solid var(--line);padding-top:1rem">'
+    + '<h4 style="margin-bottom:.7rem">'+(editing ? "Edytuj wpis" : cfg.title)+'</h4>'
+    + cfg.form({allergen:"",kind:"",reaction:"",severity:2,note:"",name:"",atc:"",dose:"",freq:"",route:"",since:"",anticoag:false,icd10:"",status:"",relation:"",phone:"",primary:false, ...draft})
+    + '<div class="row" style="margin-top:.8rem"><button class="btn btn-primary" type="submit">'+(editing?"Zapisz zmianę":"Dodaj")+'</button>'
+    + (editing ? '<button class="btn" type="button" id="cancelEdit">Anuluj</button>' : "")
+    + '<span class="tiny muted">Wpis zostanie oznaczony jako: '+(src==="lekarz"?"zweryfikowany przez lekarza":"wpis pacjenta")+'</span></div></form>';
+
+  document.getElementById("rows").addEventListener("click", async ev => {
+    const btn = ev.target.closest("[data-act]"); if(!btn) return;
+    const id = btn.closest("[data-id]").dataset.id;
+    if(btn.dataset.act === "del"){
+      CARD[cfg.key] = list.filter(x => x.id !== id); await persist(); toast("Wpis usunięty"); renderTab();
+    } else { EDIT[cfg.key] = id; renderTab(); document.getElementById("fEntry").scrollIntoView({behavior:"smooth", block:"nearest"}); }
+  });
+  const ce = document.getElementById("cancelEdit");
+  if(ce) ce.addEventListener("click", () => { EDIT[cfg.key] = null; renderTab(); });
+  document.getElementById("fEntry").addEventListener("submit", async ev => {
+    ev.preventDefault();
+    const data = cfg.read(ev.target);
+    let current;
+    if(editing){ Object.assign(editing, data, {source:src}); current = editing; }
+    else { current = Object.assign({id:uid(), source:src}, data); CARD[cfg.key] = list.concat([current]); }
+    if(cfg.key === "contacts" && data.primary) CARD.contacts.forEach(k => { if(k.id !== current.id) k.primary = false; });
+    EDIT[cfg.key] = null;
+    await persist(); toast(editing ? "Zmiana zapisana" : "Wpis dodany"); renderTab();
+  });
+}
+
+/* ---------------- gates ---------------- */
+async function renderCardView(){
+  const s = ses.get();
+  if(s && s.role === "pacjent" && s.dg){
+    const r = await store.openWithDigest(s.tagId, s.dg);
+    if(r.ok){ CARD = r.card; ROLE = "pacjent"; renderEditor(); return; }
+    ses.clear();
+  }
+  view.innerHTML = '<div class="stack" style="max-width:900px;margin-inline:auto">'
+  + '<div><p class="eyebrow">Rola: pacjent</p><h1 style="font-size:2rem">Moja karta</h1>'
+  + '<p class="muted" style="margin-top:.5rem">Identyfikator opaski i PIN otwierają kartę do edycji. Ratownikowi wystarczy sam identyfikator — PIN chroni edycję, nie odczyt ratunkowy.</p></div>'
+  + '<div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(280px,1fr))">'
+  + '<div class="panel"><div class="panel-h"><h3>Otwórz istniejącą kartę</h3></div><div class="panel-b"><form id="fOpen" class="stack">'
+  +   '<label class="f">Identyfikator opaski<input class="mono" name="tag" required placeholder="HERO-0000-XX"></label>'
+  +   '<label class="f">PIN<input type="password" name="pin" inputmode="numeric" required placeholder="4–6 cyfr"></label>'
+  +   '<button class="btn btn-primary" type="submit">Otwórz kartę</button><p id="openErr" class="tiny" style="color:var(--crit)"></p></form></div></div>'
+  + '<div class="panel"><div class="panel-h"><h3>Załóż nową kartę</h3></div><div class="panel-b"><form id="fNew" class="stack">'
+  +   '<label class="f">Imię i nazwisko<input name="name" required placeholder="Jan Kowalski"></label>'
+  +   '<label class="f">PIN do edycji<input type="password" name="pin" inputmode="numeric" minlength="4" maxlength="6" required placeholder="4–6 cyfr"></label>'
+  +   '<label class="f">Powtórz PIN<input type="password" name="pin2" inputmode="numeric" required></label>'
+  +   '<button class="btn btn-primary" type="submit">Utwórz kartę</button><p id="newErr" class="tiny" style="color:var(--crit)"></p></form></div></div>'
+  + '</div>'
+  + '<div class="notice"><span>Prototyp: dane tej karty zostają w pamięci tej przeglądarki i nie są wysyłane na serwer. Nie wprowadzaj danych, których nie chcesz tu zostawić. Kartę można usunąć jednym przyciskiem.</span></div>'
+  + '</div>';
+
+  document.getElementById("fOpen").addEventListener("submit", async e => {
+    e.preventDefault(); const f = e.target;
+    const tag = f.tag.value.trim().toUpperCase();
+    const r = await store.verify(tag, f.pin.value);
+    if(!r.ok){ document.getElementById("openErr").textContent = r.reason === "pin" ? "Nieprawidłowy PIN." : "Nie ma karty o tym identyfikatorze."; return; }
+    CARD = r.card; ROLE = "pacjent"; TAB = "podstawowe"; ses.set({tagId:tag, role:"pacjent", dg:PIN_DG}); renderEditor();
+  });
+  document.getElementById("fNew").addEventListener("submit", async e => {
+    e.preventDefault(); const f = e.target;
+    if(f.pin.value !== f.pin2.value){ document.getElementById("newErr").textContent = "PIN-y się różnią."; return; }
+    const tag = genTag(); const c = blankCard(tag);
+    c.person.name = f.name.value.trim();
+    c.pinHash = await digest(tag, f.pin.value);
+    PIN_DG = c.pinHash;
+    CARD = c; ROLE = "pacjent"; TAB = "podstawowe";
+    await store.save(c); ses.set({tagId:tag, role:"pacjent", dg:PIN_DG});
+    renderEditor(); toast("Karta " + tag + " utworzona");
+  });
+}
+
+async function renderDoctorView(){
+  const s = ses.get();
+  if(s && s.role === "lekarz" && s.dg){
+    const r = await store.openWithDigest(s.tagId, s.dg);
+    if(r.ok){ CARD = r.card; ROLE = "lekarz"; renderEditor(); return; }
+    ses.clear();
+  }
+  view.innerHTML = '<div class="stack gate">'
+  + '<div><p class="eyebrow">Rola: lekarz</p><h1 style="font-size:2rem">Panel lekarza</h1>'
+  + '<p class="muted" style="margin-top:.5rem">Pacjent podaje identyfikator opaski i PIN. Wpisy dodane w tym trybie są oznaczone jako zweryfikowane przez lekarza.</p></div>'
+  + '<div class="panel"><div class="panel-b"><form id="fDoc" class="stack">'
+  +   '<label class="f">Identyfikator opaski<input class="mono" name="tag" required placeholder="HERO-0000-XX"></label>'
+  +   '<label class="f">Kod dostępu (PIN pacjenta)<input type="password" name="pin" inputmode="numeric" required></label>'
+  +   '<label class="f">Kto otwiera kartę<input name="who" placeholder="dr Tomasz Lewandowski, PWZ 1234567"></label>'
+  +   '<button class="btn btn-primary" type="submit">Otwórz kartę pacjenta</button><p id="docErr" class="tiny" style="color:var(--crit)"></p>'
+  + '</form></div></div>'
+  + '<p class="tiny muted">Otwarcie karty w tym trybie zapisuje się w historii odczytów widocznej dla pacjenta.</p></div>';
+
+  document.getElementById("fDoc").addEventListener("submit", async e => {
+    e.preventDefault(); const f = e.target;
+    const tag = f.tag.value.trim().toUpperCase();
+    const r = await store.verify(tag, f.pin.value);
+    if(!r.ok){ document.getElementById("docErr").textContent = r.reason === "pin" ? "Nieprawidłowy kod dostępu." : "Nie ma karty o tym identyfikatorze."; return; }
+    const entry = await store.logRead(tag, f.who.value.trim() || "lekarz (bez podpisu)", "dostęp lekarza");
+    r.card.reads = [entry].concat(r.card.reads || []);
+    CARD = r.card; ROLE = "lekarz"; TAB = "podstawowe"; ses.set({tagId:tag, role:"lekarz", dg:PIN_DG});
+    renderEditor();
+  });
+}
+
+/* ---------------- router ---------------- */
+async function route(){
+  const raw = (location.hash || "#/").slice(1);
+  const qi = raw.indexOf("?");
+  const path = qi < 0 ? raw : raw.slice(0, qi);
+  const params = new URLSearchParams(qi < 0 ? "" : raw.slice(qi + 1));
+  document.querySelectorAll("#nav a").forEach(a => {
+    if(a.getAttribute("href") === "#" + path) a.setAttribute("aria-current", "page"); else a.removeAttribute("aria-current");
+  });
+  window.scrollTo({top:0});
+  if(path === "/karta") return renderCardView();
+  if(path === "/odczyt") return renderScan(params);
+  if(path === "/lekarz") return renderDoctorView();
+  return renderStart();
+}
+
+async function boot(){
+  try {
+    const r = await fetch("api/health", {cache:"no-store"});
+    if(r.ok){ const j = await r.json(); API = !!(j && j.service === "hero"); }
+  } catch(e){ API = false; }
+  modeChip.textContent = API ? "serwer HERO" : "dane w tej przeglądarce";
+  modeChip.dataset.on = API ? "api" : "local";
+  modeChip.title = API ? "Karty zapisywane w bazie serwera HERO" : "Karty zapisywane w pamięci tej przeglądarki (localStorage)";
+  if(!API) await ensureExample();
+  window.addEventListener("hashchange", route);
+  route();
+}
+boot();
+})();
+</script>
+</body>
+</html>
