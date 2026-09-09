@@ -18,13 +18,12 @@ założone po to, żeby demo miało co pokazać; zwykłej karty nie da się prze
 już klient — nadaje go wyłącznie zapis z `trusted`, czyli `seed.js`. Do rozstrzygnięcia zostaje, czy
 przy kontach lekarzy lista kart będzie w ogóle potrzebna.
 
-**Podpis źródła — zrobione.** Serwer nie przyjmuje już `source: "lekarz"` z żądania: wpis zachowuje
-podpis tylko wtedy, gdy leżał z nim w bazie i nie zmienił treści, a `updatedBy` zapisuje się jako
-„pacjent" (`server/db.js`). Kosztem jest to, że podpis lekarza dziś nie powstaje — wraca razem
-z kontami lekarzy (punkt 4), już jako podpis konta, nie pole w żądaniu.
+**Podpis źródła — zrobione.** Serwer nie przyjmuje `source: "lekarz"` z żądania: wpis zachowuje
+podpis tylko wtedy, gdy leżał z nim w bazie i nie zmienił treści (`server/db.js`). Podpis powstaje
+wyłącznie z konta lekarza (punkt 4) i niesie jego numer PWZ.
 
 **Ślad odczytu — częściowo zrobione.** Kontekst wpisu nadaje serwer z zamkniętej listy, dostęp
-lekarza wymaga PIN-u karty, żądania z jednego adresu tnie limit (30 na minutę, licznik w pamięci
+lekarza wymaga konta lekarza, żądania z jednego adresu tnie limit (30 na minutę, licznik w pamięci
 procesu), a historia karty trzyma ostatnie 200 wpisów. Zostaje opis czytnika, który przy odczycie
 ratunkowym nadal jest deklaracją klienta: potwierdzi go dopiero uwierzytelnienie czytnika (punkt 4).
 Sam limit trzeba przenieść na wspólny magazyn, gdy serwer przestanie być jedną instancją.

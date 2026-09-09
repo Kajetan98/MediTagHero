@@ -14,7 +14,7 @@ cards (
   demo       INTEGER,            -- 1 dla kart przykładowych; tylko te wychodzą w GET /api/cards
                                  -- ustawia je wyłącznie zapis z `trusted`, nie żądanie HTTP
   updated_at TEXT,               -- ISO 8601
-  updated_by TEXT                -- 'pacjent' | 'lekarz' | 'przykład'; przysyła je klient
+  updated_by TEXT                -- 'pacjent' | 'lekarz' | 'przykład'; nadaje serwer z konta zapisu
 )
 
 reads (
@@ -107,11 +107,10 @@ zapisuje się jako „lekarz" przy koncie i „pacjent" bez konta. Zapis z pomin
 Bez serwera reguły nie ma czym egzekwować. W trybie przeglądarkowym konto lekarza leży w `localStorage`
 pod kluczem `hero.doctors.v1`, a podpis jest etykietą, nie dowodem.
 
-W praktyce znaczy to, że podpis lekarza nie powstaje dziś w ogóle: skoro lekarz uwierzytelnia się
-PIN-em pacjenta, serwer nie ma czym odróżnić jednego od drugiego. Podpis wraca razem z kontami
-lekarzy (punkt 4 w `plan-rozwoju.md`) i wtedy pochodzi z konta, nie z pola w żądaniu. W trybie bez
-serwera przeglądarka nadal zapisuje `source` z roli — dane nie opuszczają wtedy jednej przeglądarki
-i nikt tego podpisu nie weryfikuje.
+Konto lekarza nie zmienia sposobu wchodzenia do karty — do tego nadal służy PIN pacjenta. Zmienia
+to, co zostaje po zapisie: zamiast anonimowego „zweryfikowane przez lekarza" wpis niesie nazwisko
+i numer PWZ konta, którym szedł zapis. Dostęp nadawany osobnym kodem pacjenta zostaje w planie
+rozwoju (punkt 4).
 
 **Część pól steruje układem odczytu ratunkowego.** Do paska flag na górze trafiają: alergia
 o `severity` 3 lub 4, każdy lek z `anticoag`, niepuste `person.devices`, `person.dnr`
@@ -129,10 +128,10 @@ i historią — bo dane nie opuszczają jednej przeglądarki.
 
 **Ślad odczytu ratunkowego zapisze każdy, kto zna identyfikator opaski** — inaczej nie da się go
 pogodzić z odczytem bez logowania. Serwer ogranicza to z trzech stron: `ctx` bierze z zamkniętej
-listy (`READ_CTX`), wpis o dostępie lekarza przyjmuje wyłącznie z PIN-em karty, a liczbę żądań
+listy (`READ_CTX`), wpis o dostępie lekarza przyjmuje wyłącznie z konta lekarza, a liczbę żądań
 z jednego adresu tnie limit z `server/limit.js`. Historia karty trzyma ostatnie 200 wpisów, starsze
-kasuje się przy zapisie. Opis czytnika (`by`) zostaje deklaracją klienta — potwierdzi go dopiero
-uwierzytelnienie czytnika (punkt 4 w `plan-rozwoju.md`).
+kasuje się przy zapisie. Przy dostępie lekarza opis czytnika bierze się z konta; przy odczycie
+ratunkowym zostaje deklaracją klienta — potwierdzi go dopiero uwierzytelnienie czytnika.
 
 **Identyfikatory wpisów nadaje przeglądarka** (`Math.random`), bo wpisy nie wychodzą poza jedną kartę.
 Identyfikatory odczytów nadaje serwer (`randomUUID`), bo są dowodem dostępu — poza trybem bez
