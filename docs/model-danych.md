@@ -11,9 +11,10 @@ cards (
   name       TEXT,               -- zdenormalizowane na potrzeby listy
   pin        TEXT,               -- scrypt$<sól>$<klucz> ze skrótu przysłanego przez przeglądarkę
   data       TEXT,               -- JSON: person, allergies, meds, conditions, contacts
-  demo       INTEGER,            -- 1 dla kart przykładowych
+  demo       INTEGER,            -- 1 dla kart przykładowych; tylko te wychodzą w GET /api/cards
+                                 -- ustawia je wyłącznie zapis z `trusted`, nie żądanie HTTP
   updated_at TEXT,               -- ISO 8601
-  updated_by TEXT                -- 'pacjent' | 'lekarz' | 'przykład'
+  updated_by TEXT                -- 'pacjent' | 'lekarz' | 'przykład'; przysyła je klient
 )
 
 reads (
@@ -21,7 +22,8 @@ reads (
   tag_id TEXT REFERENCES cards(tag_id) ON DELETE CASCADE,
   at     TEXT,   -- czas nadany przez serwer, nie przez klienta
   "by"   TEXT,   -- opis czytnika, np. "ZRM P-12"
-  ctx    TEXT    -- 'odczyt ratunkowy' | 'dostęp lekarza'
+  ctx    TEXT    -- 'odczyt ratunkowy' | 'dostęp lekarza'; nadaje serwer, wartość spoza tych dwóch
+                 -- schodzi do odczytu ratunkowego
 )
 ```
 
@@ -72,16 +74,39 @@ reads (
 ## Decyzje, które warto znać
 
 **`source` na każdym wpisie.** Ratownik musi odróżnić „pacjent tak napisał" od „lekarz to potwierdził".
-Pole ustawia serwer aplikacji na podstawie roli, w której otwarto kartę, a nie formularz.
+Wartości „lekarz" nie nadaje klient: `upsert` w `server/db.js` przepuszcza ją tylko wtedy, gdy wpis
+o tym samym `id` już leżał w bazie z tym podpisem i nie zmienił treści. Każdy nowy lub zmieniony wpis
+dostaje `source: "pacjent"`, `updatedBy` zapisuje się jako „pacjent". Zapis z pominięciem tej reguły
+ma tylko `seed.js` (`upsert` z `{ trusted: true }`), bo nie idzie przez HTTP.
 
-**`severity` i `anticoag` to pola sterujące widokiem.** Alergia od 3 w górę i każdy antykoagulant
-trafiają do paska flag na górze odczytu ratunkowego. To jedyne miejsce, gdzie dane wpływają na układ ekranu.
+W praktyce znaczy to, że podpis lekarza nie powstaje dziś w ogóle: skoro lekarz uwierzytelnia się
+PIN-em pacjenta, serwer nie ma czym odróżnić jednego od drugiego. Podpis wraca razem z kontami
+lekarzy (punkt 4 w `plan-rozwoju.md`) i wtedy pochodzi z konta, nie z pola w żądaniu. W trybie bez
+serwera przeglądarka nadal zapisuje `source` z roli — dane nie opuszczają wtedy jednej przeglądarki
+i nikt tego podpisu nie weryfikuje.
 
-**`status: "przebyta"`** wypada z odczytu ratunkowego (`critical()` po stronie przeglądarki,
-zestaw jawny po stronie serwera), ale zostaje w karcie pacjenta.
+**Część pól steruje układem odczytu ratunkowego.** Do paska flag na górze trafiają: alergia
+o `severity` 3 lub 4, każdy lek z `anticoag`, niepuste `person.devices`, `person.dnr`
+i `person.donor`. Kolejność wpisów też wynika z danych — alergie idą malejąco po `severity`,
+leki z antykoagulantami na początku. `contacts[].primary` dostaje znacznik „pierwszy".
+
+**`status: "przebyta"`** wypada z odczytu ratunkowego, ale zostaje w karcie pacjenta. Filtruje
+wyłącznie przeglądarka (`critical()`); `GET /api/cards/:tag` oddaje wszystkie rozpoznania, także
+przebyte. Ekran odczytu ich nie pokaże, samo API — tak.
 
 **Historia odczytów nie wychodzi z zestawu jawnego.** `GET /api/cards/:tag` zwraca kartę bez `reads`
-i bez `pinHash`; historia wymaga PIN-u (`POST /api/cards/:tag/session`).
+i bez `pinHash`; historia wymaga PIN-u (`POST /api/cards/:tag/session`). Dotyczy to trybu z serwerem:
+bez niego aplikacja czyta `localStorage`, gdzie karta leży w całości — razem ze skrótem PIN-u
+i historią — bo dane nie opuszczają jednej przeglądarki.
+
+**Ślad odczytu ratunkowego zapisze każdy, kto zna identyfikator opaski** — inaczej nie da się go
+pogodzić z odczytem bez logowania. Serwer ogranicza to z trzech stron: `ctx` bierze z zamkniętej
+listy (`READ_CTX`), wpis o dostępie lekarza przyjmuje wyłącznie z PIN-em karty, a liczbę żądań
+z jednego adresu tnie limit z `server/limit.js`. Historia karty trzyma ostatnie 200 wpisów, starsze
+kasuje się przy zapisie. Opis czytnika (`by`) zostaje deklaracją klienta — potwierdzi go dopiero
+uwierzytelnienie czytnika (punkt 4 w `plan-rozwoju.md`).
 
 **Identyfikatory wpisów nadaje przeglądarka** (`Math.random`), bo wpisy nie wychodzą poza jedną kartę.
-Identyfikatory odczytów nadaje serwer (`randomUUID`), bo są dowodem dostępu.
+Identyfikatory odczytów nadaje serwer (`randomUUID`), bo są dowodem dostępu — poza trybem bez
+serwera i sytuacją, w której zapis odczytu nie dochodzi; wtedy identyfikator i czas pochodzą
+z przeglądarki.

@@ -352,7 +352,10 @@ const store = {
   async logRead(tagId, by, ctx){
     const payload = {by: by || "nieznany czytnik", ctx: ctx || "odczyt ratunkowy"};
     if(API){
-      const r = await fetch(api("cards/" + encodeURIComponent(tagId) + "/reads"), {method:"POST", headers:{"content-type":"application/json"}, body: JSON.stringify(payload)});
+      /* wpis o dostępie lekarza serwer przyjmuje tylko z PIN-em karty */
+      const headers = {"content-type":"application/json"};
+      if(payload.ctx === "dostęp lekarza" && PIN_DG) headers["x-hero-pin"] = PIN_DG;
+      const r = await fetch(api("cards/" + encodeURIComponent(tagId) + "/reads"), {method:"POST", headers, body: JSON.stringify(payload)});
       if(r.ok) return r.json();
       return Object.assign({id:uid(), at:nowISO()}, payload);
     }
@@ -476,7 +479,7 @@ async function renderStart(){
   + '<section style="margin-top:2.6rem"><h2>Wejdź jako</h2><p class="muted small" style="margin:.3rem 0 1rem">Trzy role, trzy różne zakresy dostępu do tej samej karty.</p>'
   +   '<div class="roles">'
   +     '<a class="role" href="#/karta"><h3>Pacjent</h3><p>Zakładasz kartę, ustawiasz PIN i decydujesz, co widzi ratownik. Możesz kartę usunąć w każdej chwili.</p><div class="go">Moja karta →</div></a>'
-  +     '<a class="role" href="#/lekarz"><h3>Lekarz</h3><p>Otwierasz kartę pacjenta jego kodem dostępu i uzupełniasz rozpoznania, leki i alergie. Twoje wpisy są podpisane.</p><div class="go">Panel lekarza →</div></a>'
+  +     '<a class="role" href="#/lekarz"><h3>Lekarz</h3><p>Otwierasz kartę pacjenta jego kodem dostępu i uzupełniasz rozpoznania, leki i alergie.</p><div class="go">Panel lekarza →</div></a>'
   +     '<a class="role crit" href="#/odczyt"><h3>Ratownik</h3><p>Sam identyfikator opaski, bez hasła. Zestaw krytyczny: alergie, antykoagulanty, choroby, kontakt alarmowy.</p><div class="go">Odczyt ratunkowy →</div></a>'
   +   '</div>'
   + '</section>'
@@ -764,7 +767,10 @@ async function renderCardView(){
   +   '<label class="f">Powtórz PIN<input type="password" name="pin2" inputmode="numeric" required></label>'
   +   '<button class="btn btn-primary" type="submit">Utwórz kartę</button><p id="newErr" class="tiny" style="color:var(--crit)"></p></form></div></div>'
   + '</div>'
-  + '<div class="notice"><span>Prototyp: dane tej karty zostają w pamięci tej przeglądarki i nie są wysyłane na serwer. Nie wprowadzaj danych, których nie chcesz tu zostawić. Kartę można usunąć jednym przyciskiem.</span></div>'
+  + '<div class="notice"><span>Prototyp: ' + (API
+      ? 'karta zapisuje się w bazie serwera HERO, a jej zestaw krytyczny odczyta każdy, kto zna identyfikator opaski. Nie wprowadzaj danych, których nie chcesz tam zostawić.'
+      : 'dane tej karty zostają w pamięci tej przeglądarki i nie są wysyłane na serwer. Nie wprowadzaj danych, których nie chcesz tu zostawić.')
+    + ' Kartę można usunąć jednym przyciskiem.</span></div>'
   + '</div>';
 
   document.getElementById("fOpen").addEventListener("submit", async e => {
@@ -796,7 +802,9 @@ async function renderDoctorView(){
   }
   view.innerHTML = '<div class="stack gate">'
   + '<div><p class="eyebrow">Rola: lekarz</p><h1 style="font-size:2rem">Panel lekarza</h1>'
-  + '<p class="muted" style="margin-top:.5rem">Pacjent podaje identyfikator opaski i PIN. Wpisy dodane w tym trybie są oznaczone jako zweryfikowane przez lekarza.</p></div>'
+  + '<p class="muted" style="margin-top:.5rem">Pacjent podaje identyfikator opaski i PIN. ' + (API
+      ? 'Serwer zapisuje wpisy z tego panelu jako wpisy pacjenta: dopóki lekarz uwierzytelnia się PIN-em pacjenta, nie ma czym odróżnić jednego od drugiego. Podpis lekarza wróci razem z kontami lekarzy.'
+      : 'Wpisy dodane w tym trybie są oznaczone jako zweryfikowane przez lekarza. To tryb demo bez serwera — podpisu nikt nie weryfikuje.') + '</p></div>'
   + '<div class="panel"><div class="panel-b"><form id="fDoc" class="stack">'
   +   '<label class="f">Identyfikator opaski<input class="mono" name="tag" required placeholder="HERO-0000-XX"></label>'
   +   '<label class="f">Kod dostępu (PIN pacjenta)<input type="password" name="pin" inputmode="numeric" required></label>'

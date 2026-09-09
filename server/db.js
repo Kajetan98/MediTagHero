@@ -6,6 +6,7 @@ import { hashPin, verifyPin } from "./pin.js";
 
 const SECTIONS = ["allergies", "meds", "conditions", "contacts"];
 const READ_LIMIT = 200;
+export const READ_CTX = ["odczyt ratunkowy", "dostęp lekarza"];
 
 export function openDatabase(file = process.env.HERO_DB || "data/hero.sqlite") {
   if (file !== ":memory:") mkdirSync(dirname(file), { recursive: true });
@@ -36,6 +37,14 @@ export function openDatabase(file = process.env.HERO_DB || "data/hero.sqlite") {
 const str = v => (typeof v === "string" ? v : v == null ? "" : String(v));
 const arr = v => (Array.isArray(v) ? v : []);
 
+/** Porównanie treści wpisu niezależne od kolejności kluczy w JSON-ie. */
+const canon = v => {
+  if (Array.isArray(v)) return v.map(canon);
+  if (v && typeof v === "object") return Object.fromEntries(Object.keys(v).sort().map(k => [k, canon(v[k])]));
+  return v;
+};
+const same = (a, b) => JSON.stringify(canon(a)) === JSON.stringify(canon(b));
+
 class CardStore {
   constructor(db) { this.db = db; }
   close() { this.db.close(); }
@@ -55,10 +64,18 @@ class CardStore {
     return card;
   }
 
-  list() {
-    return this.db.prepare("SELECT tag_id, name, demo, updated_at FROM cards ORDER BY updated_at DESC").all()
+  /**
+   * Lista kart nie wychodzi na zewnątrz: identyfikator opaski jest jedynym kluczem do odczytu
+   * ratunkowego, więc jej wydanie znosiłoby ochronę wynikającą z długiego identyfikatora.
+   * `demoOnly` zawęża wynik do kart przykładowych i tylko taką listę oddaje API.
+   */
+  list(demoOnly = false) {
+    const where = demoOnly ? "WHERE demo = 1 " : "";
+    return this.db.prepare(`SELECT tag_id, name, demo, updated_at FROM cards ${where}ORDER BY updated_at DESC`).all()
       .map(r => ({ tagId: r.tag_id, name: r.name, demo: !!r.demo, updatedAt: r.updated_at }));
   }
+
+  count() { return this.db.prepare("SELECT COUNT(*) AS n FROM cards").get().n; }
 
   has(tagId) { return !!this.db.prepare("SELECT 1 FROM cards WHERE tag_id = ?").get(tagId); }
 
@@ -68,25 +85,46 @@ class CardStore {
     return verifyPin(digest, row.pin);
   }
 
-  /** Tworzy kartę (wymaga pinHash w treści) albo aktualizuje istniejącą. */
-  upsert(tagId, body, digest) {
+  /**
+   * Podpisu „lekarz" nie nadaje klient. Wpis zachowuje `source: "lekarz"` tylko wtedy, gdy
+   * identyczny wpis o tym samym `id` już leżał w bazie z tym podpisem — inaczej schodzi do
+   * „pacjent". Dopóki lekarz uwierzytelnia się PIN-em pacjenta, nie ma czym odróżnić jednego
+   * od drugiego; podpis wróci razem z kontami lekarzy (punkt 4 w docs/plan-rozwoju.md).
+   */
+  #keepSignatures(section, incoming, prev) {
+    const before = new Map(arr(prev && prev[section]).map(e => [str(e && e.id), e]));
+    return incoming.map(entry => {
+      if (!entry || typeof entry !== "object" || entry.source !== "lekarz") return entry;
+      const old = before.get(str(entry.id));
+      return old && old.source === "lekarz" && same(old, entry) ? entry : { ...entry, source: "pacjent" };
+    });
+  }
+
+  /**
+   * Tworzy kartę (wymaga pinHash w treści) albo aktualizuje istniejącą.
+   * `trusted` omija odsiewanie podpisów i pozwala oznaczyć kartę jako przykładową; jest dla zapisu
+   * spoza HTTP (seed) — serwer go nie ustawia, więc żądanie nie założy karty widocznej na liście.
+   */
+  upsert(tagId, body, digest, { trusted = false } = {}) {
     const exists = this.has(tagId);
     if (exists && !this.checkPin(tagId, digest)) return { status: 403, error: "Nieprawidłowy PIN karty" };
     if (!exists && !body.pinHash) return { status: 400, error: "Nowa karta wymaga pola pinHash" };
 
     const person = body.person && typeof body.person === "object" ? body.person : {};
-    const data = { person, ...Object.fromEntries(SECTIONS.map(k => [k, arr(body[k])])) };
+    const prev = exists ? this.publicCard(tagId) : null;
+    const data = { person, ...Object.fromEntries(SECTIONS.map(k =>
+      [k, trusted ? arr(body[k]) : this.#keepSignatures(k, arr(body[k]), prev)])) };
     const payload = JSON.stringify(data);
     if (payload.length > 256 * 1024) return { status: 413, error: "Karta przekracza 256 kB" };
 
     const now = new Date().toISOString();
-    const updatedBy = str(body.updatedBy) || "pacjent";
+    const updatedBy = trusted ? str(body.updatedBy) || "pacjent" : "pacjent";
     if (exists) {
       this.db.prepare("UPDATE cards SET name = ?, data = ?, updated_at = ?, updated_by = ? WHERE tag_id = ?")
         .run(str(person.name), payload, now, updatedBy, tagId);
     } else {
       this.db.prepare("INSERT INTO cards (tag_id, name, pin, data, demo, updated_at, updated_by) VALUES (?, ?, ?, ?, ?, ?, ?)")
-        .run(tagId, str(person.name), hashPin(body.pinHash), payload, body.demo ? 1 : 0, now, updatedBy);
+        .run(tagId, str(person.name), hashPin(body.pinHash), payload, trusted && body.demo ? 1 : 0, now, updatedBy);
     }
     return { status: exists ? 200 : 201, card: this.fullCard(tagId) };
   }
@@ -99,11 +137,19 @@ class CardStore {
     return { status: 204 };
   }
 
-  /** Ślad odczytu. Czas i identyfikator nadaje serwer, nie klient. */
+  /**
+   * Ślad odczytu. Czas, identyfikator i kontekst nadaje serwer: `ctx` spoza `READ_CTX` schodzi
+   * do odczytu ratunkowego, a historia starsza niż ostatnie `READ_LIMIT` wpisów jest kasowana,
+   * żeby zalewanie karty odczytami nie rosło w nieskończoność. Opis czytnika (`by`) pozostaje
+   * deklaracją klienta — potwierdzi go dopiero uwierzytelnienie czytnika.
+   */
   addRead(tagId, by, ctx) {
     if (!this.has(tagId)) return null;
-    const entry = { id: randomUUID(), at: new Date().toISOString(), by: str(by).slice(0, 120) || "nieznany czytnik", ctx: str(ctx).slice(0, 120) || "odczyt ratunkowy" };
+    const entry = { id: randomUUID(), at: new Date().toISOString(), by: str(by).slice(0, 120) || "nieznany czytnik",
+      ctx: READ_CTX.includes(str(ctx)) ? str(ctx) : READ_CTX[0] };
     this.db.prepare('INSERT INTO reads (id, tag_id, at, "by", ctx) VALUES (?, ?, ?, ?, ?)').run(entry.id, tagId, entry.at, entry.by, entry.ctx);
+    this.db.prepare('DELETE FROM reads WHERE tag_id = ? AND id NOT IN (SELECT id FROM reads WHERE tag_id = ? ORDER BY at DESC LIMIT ?)')
+      .run(tagId, tagId, READ_LIMIT);
     return entry;
   }
 

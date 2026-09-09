@@ -41,7 +41,7 @@ const card = {
 };
 
 const store = openDatabase();
-const out = store.upsert(TAG, card, card.pinHash);
+const out = store.upsert(TAG, card, card.pinHash, { trusted: true });
 store.close();
 if (out.error) { console.error("Nie udało się dodać karty:", out.error); process.exit(1); }
 console.log(`Karta ${TAG} gotowa (PIN 1234).`);
