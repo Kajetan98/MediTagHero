@@ -18,12 +18,10 @@ długości i tak wydaje jedno żądanie. Endpoint obsługuje wyłącznie ekran s
 rozstrzygnięcia: ograniczyć go do kart oznaczonych `demo` albo usunąć razem z listą na stronie
 startowej. `GET /api/health` przy okazji podaje liczbę kart w bazie.
 
-**Podpis źródła nadaje przeglądarka.** `docs/model-danych.md` mówi, że `source` ustawia serwer na
-podstawie roli. W kodzie ustawia je klient (`web/app.html`, zapis wpisu w `renderTab`), a serwer
-zapisuje sekcje karty bez sprawdzania tego pola; `updatedBy` też przychodzi w treści żądania
-(`server/db.js`). Kto ma PIN karty, może oznaczyć dowolny wpis jako zweryfikowany przez lekarza.
-Do czasu kont lekarzy (punkt 4) serwer powinien odrzucać `source: "lekarz"`, a dokumentacja —
-opisywać stan faktyczny.
+**Podpis źródła — zrobione.** Serwer nie przyjmuje już `source: "lekarz"` z żądania: wpis zachowuje
+podpis tylko wtedy, gdy leżał z nim w bazie i nie zmienił treści, a `updatedBy` zapisuje się jako
+„pacjent" (`server/db.js`). Kosztem jest to, że podpis lekarza dziś nie powstaje — wraca razem
+z kontami lekarzy (punkt 4), już jako podpis konta, nie pole w żądaniu.
 
 **Ślad odczytu przyjmuje każdy.** `POST /api/cards/:tag/reads` nie wymaga niczego poza istniejącym
 identyfikatorem, a opis czytnika podaje klient. Historia ma być dowodem dostępu, a da się ją

@@ -72,11 +72,16 @@ reads (
 ## Decyzje, które warto znać
 
 **`source` na każdym wpisie.** Ratownik musi odróżnić „pacjent tak napisał" od „lekarz to potwierdził".
-Wartość ustawia przeglądarka z roli, w której otwarto kartę (`renderTab` w `web/app.html`) — nie
-formularz, ale też nie serwer: `upsert` w `server/db.js` zapisuje sekcje karty bez sprawdzania tego
-pola, tak samo jak `updatedBy` przyjmowane z treści żądania. Kto zna PIN karty, może więc oznaczyć
-dowolny wpis jako zweryfikowany przez lekarza. Przeniesienie tej decyzji na serwer to punkt 2
-w `plan-rozwoju.md`; docelowo zastępuje ją podpis konta lekarza (punkt 4).
+Wartości „lekarz" nie nadaje klient: `upsert` w `server/db.js` przepuszcza ją tylko wtedy, gdy wpis
+o tym samym `id` już leżał w bazie z tym podpisem i nie zmienił treści. Każdy nowy lub zmieniony wpis
+dostaje `source: "pacjent"`, `updatedBy` zapisuje się jako „pacjent". Zapis z pominięciem tej reguły
+ma tylko `seed.js` (`upsert` z `{ trusted: true }`), bo nie idzie przez HTTP.
+
+W praktyce znaczy to, że podpis lekarza nie powstaje dziś w ogóle: skoro lekarz uwierzytelnia się
+PIN-em pacjenta, serwer nie ma czym odróżnić jednego od drugiego. Podpis wraca razem z kontami
+lekarzy (punkt 4 w `plan-rozwoju.md`) i wtedy pochodzi z konta, nie z pola w żądaniu. W trybie bez
+serwera przeglądarka nadal zapisuje `source` z roli — dane nie opuszczają wtedy jednej przeglądarki
+i nikt tego podpisu nie weryfikuje.
 
 **Część pól steruje układem odczytu ratunkowego.** Do paska flag na górze trafiają: alergia
 o `severity` 3 lub 4, każdy lek z `anticoag`, niepuste `person.devices`, `person.dnr`

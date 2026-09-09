@@ -36,6 +36,14 @@ export function openDatabase(file = process.env.HERO_DB || "data/hero.sqlite") {
 const str = v => (typeof v === "string" ? v : v == null ? "" : String(v));
 const arr = v => (Array.isArray(v) ? v : []);
 
+/** Porównanie treści wpisu niezależne od kolejności kluczy w JSON-ie. */
+const canon = v => {
+  if (Array.isArray(v)) return v.map(canon);
+  if (v && typeof v === "object") return Object.fromEntries(Object.keys(v).sort().map(k => [k, canon(v[k])]));
+  return v;
+};
+const same = (a, b) => JSON.stringify(canon(a)) === JSON.stringify(canon(b));
+
 class CardStore {
   constructor(db) { this.db = db; }
   close() { this.db.close(); }
@@ -68,19 +76,39 @@ class CardStore {
     return verifyPin(digest, row.pin);
   }
 
-  /** Tworzy kartę (wymaga pinHash w treści) albo aktualizuje istniejącą. */
-  upsert(tagId, body, digest) {
+  /**
+   * Podpisu „lekarz" nie nadaje klient. Wpis zachowuje `source: "lekarz"` tylko wtedy, gdy
+   * identyczny wpis o tym samym `id` już leżał w bazie z tym podpisem — inaczej schodzi do
+   * „pacjent". Dopóki lekarz uwierzytelnia się PIN-em pacjenta, nie ma czym odróżnić jednego
+   * od drugiego; podpis wróci razem z kontami lekarzy (punkt 4 w docs/plan-rozwoju.md).
+   */
+  #keepSignatures(section, incoming, prev) {
+    const before = new Map(arr(prev && prev[section]).map(e => [str(e && e.id), e]));
+    return incoming.map(entry => {
+      if (!entry || typeof entry !== "object" || entry.source !== "lekarz") return entry;
+      const old = before.get(str(entry.id));
+      return old && old.source === "lekarz" && same(old, entry) ? entry : { ...entry, source: "pacjent" };
+    });
+  }
+
+  /**
+   * Tworzy kartę (wymaga pinHash w treści) albo aktualizuje istniejącą.
+   * `trusted` omija odsiewanie podpisów i jest dla zapisu spoza HTTP (seed) — serwer go nie ustawia.
+   */
+  upsert(tagId, body, digest, { trusted = false } = {}) {
     const exists = this.has(tagId);
     if (exists && !this.checkPin(tagId, digest)) return { status: 403, error: "Nieprawidłowy PIN karty" };
     if (!exists && !body.pinHash) return { status: 400, error: "Nowa karta wymaga pola pinHash" };
 
     const person = body.person && typeof body.person === "object" ? body.person : {};
-    const data = { person, ...Object.fromEntries(SECTIONS.map(k => [k, arr(body[k])])) };
+    const prev = exists ? this.publicCard(tagId) : null;
+    const data = { person, ...Object.fromEntries(SECTIONS.map(k =>
+      [k, trusted ? arr(body[k]) : this.#keepSignatures(k, arr(body[k]), prev)])) };
     const payload = JSON.stringify(data);
     if (payload.length > 256 * 1024) return { status: 413, error: "Karta przekracza 256 kB" };
 
     const now = new Date().toISOString();
-    const updatedBy = str(body.updatedBy) || "pacjent";
+    const updatedBy = trusted ? str(body.updatedBy) || "pacjent" : "pacjent";
     if (exists) {
       this.db.prepare("UPDATE cards SET name = ?, data = ?, updated_at = ?, updated_by = ? WHERE tag_id = ?")
         .run(str(person.name), payload, now, updatedBy, tagId);

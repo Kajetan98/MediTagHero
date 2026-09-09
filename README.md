@@ -30,12 +30,14 @@ nie opuszcza tej jednej przeglądarki. W tym trybie działa jako demo i jako Art
 | Rola | Czym się uwierzytelnia | Co może |
 |---|---|---|
 | Pacjent | identyfikator opaski + PIN | prowadzi całą kartę, widzi historię odczytów, kasuje kartę |
-| Lekarz | identyfikator opaski + PIN pacjenta | ten sam edytor co pacjent, bez usuwania karty; jego wpisy dostają znacznik „zweryfikowane przez lekarza" |
+| Lekarz | identyfikator opaski + PIN pacjenta | ten sam edytor co pacjent, bez usuwania karty |
 | Ratownik | sam identyfikator opaski | odczyt zestawu krytycznego, bez PIN-u; odczyt trafia do historii |
 
-Znacznik weryfikacji nadaje przeglądarka na podstawie roli, w której otwarto kartę; serwer go nie
-sprawdza. Dopóki lekarz wchodzi PIN-em pacjenta, „zweryfikowane przez lekarza" znaczy tyle, że wpis
-powstał w panelu lekarza — nie że stoi za nim konto z numerem PWZ.
+Wpisy z panelu lekarza serwer zapisuje jako wpisy pacjenta. Podpis „zweryfikowane przez lekarza"
+przyjmuje wyłącznie z bazy: wpis zachowuje go, gdy leżał tam z tym podpisem i nie zmienił treści —
+nowego podpisu nie nada żadne żądanie HTTP. Dopóki lekarz wchodzi PIN-em pacjenta, serwer nie ma czym
+odróżnić jednego od drugiego; podpis wróci razem z kontami lekarzy. Wyjątkiem jest `npm run seed`,
+który pisze do bazy z pominięciem tej reguły, i tryb bez serwera, gdzie karta zostaje w przeglądarce.
 
 Kolejność w odczycie ratunkowym jest celowa: najpierw alergie i anafilaksja, potem leki
 (z wyróżnionymi antykoagulantami), choroby aktywne, wszczepy i uwagi, na końcu kontakt alarmowy.
@@ -91,8 +93,9 @@ Stan na dziś to działający prototyp, nie system produkcyjny. Przed wdrożenie
   uwierzytelnienia, co znosi ochronę wynikającą z długiego identyfikatora. Endpoint obsługuje tylko
   ekran startowy demo.
 - **Brak kont lekarzy.** Lekarz wchodzi PIN-em pacjenta; docelowo potrzebne konta z numerem PWZ
-  i osobne uprawnienia zamiast współdzielonego PIN-u. Pola `source` i `updatedBy` przychodzą dziś
-  z przeglądarki, więc kto zna PIN karty, może oznaczyć wpis jako zweryfikowany przez lekarza.
+  i osobne uprawnienia zamiast współdzielonego PIN-u. Do tego czasu podpis lekarza nie powstaje:
+  serwer odrzuca `source: "lekarz"` w żądaniu, więc karty prowadzone przez HTTP mają same wpisy
+  pacjenta.
 - **Ślad odczytu przyjmuje każdy.** `POST /api/cards/:tag/reads` wymaga samego identyfikatora, a opis
   czytnika podaje klient. Historia dowodzi, że ktoś sięgnął po kartę, nie tego, kto to był.
 - **Brak limitu prób PIN-u** i brak TLS po stronie serwera (zakładany reverse proxy).
