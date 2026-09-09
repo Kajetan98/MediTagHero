@@ -16,7 +16,7 @@ flagi `--experimental-sqlite`, której serwer nie ustawia. Projekt nie ma zależ
 
 ```bash
 npm start          # buduje public/index.html i startuje serwer na :8080
-npm run seed       # dokłada przykładową kartę HERO-2481-KX (PIN 1234)
+npm run seed       # przykładowa karta HERO-2481-KX (PIN 1234) i konto lekarza (PWZ 1234567, hasło meditag123)
 npm test           # testy API (node:test)
 ```
 
@@ -31,14 +31,15 @@ nie opuszcza tej jednej przeglądarki. W tym trybie działa jako demo i jako Art
 | Rola | Czym się uwierzytelnia | Co może |
 |---|---|---|
 | Pacjent | identyfikator opaski + PIN | prowadzi całą kartę, widzi historię odczytów, kasuje kartę |
-| Lekarz | identyfikator opaski + PIN pacjenta | ten sam edytor co pacjent, bez usuwania karty |
+| Lekarz | konto z numerem PWZ + identyfikator opaski + PIN pacjenta | ten sam edytor co pacjent, bez usuwania karty; każdy jego wpis niesie nazwisko i numer PWZ |
 | Ratownik | sam identyfikator opaski | odczyt zestawu krytycznego, bez PIN-u; odczyt trafia do historii |
 
-Wpisy z panelu lekarza serwer zapisuje jako wpisy pacjenta. Podpis „zweryfikowane przez lekarza"
-przyjmuje wyłącznie z bazy: wpis zachowuje go, gdy leżał tam z tym podpisem i nie zmienił treści —
-nowego podpisu nie nada żadne żądanie HTTP. Dopóki lekarz wchodzi PIN-em pacjenta, serwer nie ma czym
-odróżnić jednego od drugiego; podpis wróci razem z kontami lekarzy. Wyjątkiem jest `npm run seed`,
-który pisze do bazy z pominięciem tej reguły, i tryb bez serwera, gdzie karta zostaje w przeglądarce.
+Podpisu lekarza nie nadaje żądanie — nadaje go serwer z konta, którym uwierzytelniono zapis. Wpis
+zachowuje podpis, który już ma, tylko gdy leżał z nim w bazie i nie zmienił treści: podpis dotyczy
+treści, więc jej zmiana go unieważnia. Wpis nowy albo zmieniony dostaje podpis konta, którym idzie
+zapis, a bez konta schodzi do „pacjent" i traci `signedBy`. Wyjątkiem jest `npm run seed`, który pisze
+do bazy z pominięciem tej reguły, i tryb bez serwera, gdzie konto lekarza leży w pamięci przeglądarki
+i podpis jest tylko etykietą.
 
 Kolejność w odczycie ratunkowym jest celowa: najpierw alergie i anafilaksja, potem leki
 (z wyróżnionymi antykoagulantami), choroby aktywne, wszczepy i uwagi, na końcu kontakt alarmowy.
@@ -51,9 +52,10 @@ tools/build.mjs   opakowuje web/app.html w public/index.html
 public/           artefakt builda, serwowany przez serwer
 server/index.js   serwer HTTP i routing
 server/db.js      schemat SQLite i operacje na kartach
-server/pin.js     scrypt na skrócie PIN-u
+server/doctors.js konta lekarzy, logowanie, sesje
+server/secrets.js scrypt na PIN-ach kart i hasłach lekarzy
 server/limit.js   licznik żądań w oknie czasu
-server/seed.js    przykładowa karta
+server/seed.js    przykładowa karta i konto lekarza
 test/api.test.js  testy API
 .github/workflows testy na każdy push i pull request (Node 22.13, 22 i 24)
 docs/             model danych i plan rozwoju
@@ -71,7 +73,11 @@ docs/             model danych i plan rozwoju
 | POST | `/api/cards/:tag/session` | `{digest}` | pełna karta z historią odczytów |
 | PUT | `/api/cards/:tag` | nagłówek `x-hero-pin` | zapis karty; gdy karty nie ma w bazie, tworzy ją na podstawie `pinHash` (bez znacznika demo) |
 | DELETE | `/api/cards/:tag` | nagłówek `x-hero-pin` | usuwa kartę i jej historię |
-| POST | `/api/cards/:tag/reads` | — dla odczytu ratunkowego, `x-hero-pin` dla dostępu lekarza | zapisuje odczyt; czas, identyfikator i kontekst nadaje serwer, opis czytnika podaje klient |
+| POST | `/api/cards/:tag/reads` | — dla odczytu ratunkowego, `x-hero-doctor` dla dostępu lekarza | zapisuje odczyt; czas, identyfikator i kontekst nadaje serwer, przy koncie lekarza także opis czytnika |
+| POST | `/api/doctors` | — | zakłada konto lekarza (`pwz`, `name`, `password`) |
+| POST | `/api/doctors/session` | `{pwz, password}` | loguje; zwraca token sesji |
+| GET | `/api/doctors/me` | nagłówek `x-hero-doctor` | konto z tokenu |
+| DELETE | `/api/doctors/session` | nagłówek `x-hero-doctor` | wylogowuje |
 
 Endpointy oznaczone „—" nie sprawdzają niczego poza poprawnością identyfikatora opaski: treść karty
 pobiera każdy, kto zna identyfikator, i każdy może dopisać wpis do historii odczytów. Karty zwykłej
@@ -100,10 +106,11 @@ Stan na dziś to działający prototyp, nie system produkcyjny. Przed wdrożenie
 - **Odczyt ratunkowy jest jawny dla każdego, kto zna identyfikator opaski.** To świadoma decyzja
   produktowa — ratownik nie ma czasu na logowanie — ale wymaga długiego, losowego identyfikatora
   (nie sekwencyjnego jak w przykładach) i mechanizmu unieważniania zgubionej opaski.
-- **Brak kont lekarzy.** Lekarz wchodzi PIN-em pacjenta; docelowo potrzebne konta z numerem PWZ
-  i osobne uprawnienia zamiast współdzielonego PIN-u. Do tego czasu podpis lekarza nie powstaje:
-  serwer odrzuca `source: "lekarz"` w żądaniu, więc karty prowadzone przez HTTP mają same wpisy
-  pacjenta.
+- **Numer PWZ nie jest weryfikowany.** Sprawdzamy tylko format — siedem cyfr. Nie liczymy cyfry
+  kontrolnej i nie odpytujemy rejestru Naczelnej Izby Lekarskiej, więc konto nie dowodzi uprawnień.
+- **Dostęp lekarza to nadal PIN pacjenta.** Konto dokłada tożsamość i podpis, nie zmienia sposobu
+  wchodzenia do karty. Docelowo pacjent nadaje dostęp osobnym kodem, z terminem ważności.
+- **Sesje lekarzy nie wygasają.**
 - **Opis czytnika w historii jest deklaracją.** Kontekst wpisu nadaje serwer, a dostęp lekarza wymaga
   PIN-u, ale pole „kto odczytał" przy odczycie ratunkowym nadal wypełnia klient. Historia dowodzi,
   że ktoś sięgnął po kartę, nie tego, kto to był; potwierdzi to dopiero uwierzytelnienie czytnika.

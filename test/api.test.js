@@ -13,13 +13,26 @@ let server, store, base;
 const call = (path, opts = {}) => fetch(base + path, opts);
 const json = async (path, opts) => { const r = await call(path, opts); return { status: r.status, body: r.status === 204 ? null : await r.json() }; };
 const session = (tag, dg) => json(`/api/cards/${tag}/session`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ digest: dg }) });
-const put = (path, body, pin) => json(path, { method: "PUT", headers: { "content-type": "application/json", ...(pin ? { "x-hero-pin": pin } : {}) }, body: JSON.stringify(body) });
+const put = (path, body, pin, doctor) => json(path, {
+  method: "PUT",
+  headers: { "content-type": "application/json", ...(pin ? { "x-hero-pin": pin } : {}), ...(doctor ? { "x-hero-doctor": doctor } : {}) },
+  body: JSON.stringify(body),
+});
+const post = (path, body, doctor) => json(path, {
+  method: "POST",
+  headers: { "content-type": "application/json", ...(doctor ? { "x-hero-doctor": doctor } : {}) },
+  body: JSON.stringify(body),
+});
+const LEKARZ = { pwz: "1234567", name: "dr Tomasz Lewandowski", password: "meditag123" };
+let TOKEN;
 
 before(async () => {
   store = openDatabase(":memory:");
   server = createServer(store, rateLimiter({ limit: 12, windowMs: 60_000 }), rateLimiter({ limit: 5, windowMs: 60_000 }));
   await new Promise(r => server.listen(0, r));
   base = `http://127.0.0.1:${server.address().port}`;
+  await post("/api/doctors", LEKARZ);
+  TOKEN = (await post("/api/doctors/session", { pwz: LEKARZ.pwz, password: LEKARZ.password })).body.token;
 });
 after(() => server.close());
 
@@ -53,7 +66,7 @@ test("nowa karta powstaje, druga próba bez PIN-u jej nie nadpisze", async () =>
 test("lista kart oddaje wyłącznie karty przykładowe", async () => {
   const tag = "HERO-3000-CC";
   const pin = digest(tag, "4321");
-  store.upsert(tag, { pinHash: pin, demo: true, person: { name: "Karta demo" } }, pin, { trusted: true });
+  store.cards.upsert(tag, { pinHash: pin, demo: true, person: { name: "Karta demo" } }, pin, { trusted: true });
 
   const podszyta = "HERO-3001-CD";
   const created = await put(`/api/cards/${podszyta}`, { pinHash: digest(podszyta, "4321"), demo: true }, null);
@@ -91,20 +104,17 @@ test("każdy odczyt trafia do historii dostępnej po PIN-ie", async () => {
   assert.equal(session.body.reads[0].by, "ZRM P-12");
 });
 
-test("kontekst odczytu nadaje serwer, dostęp lekarza wymaga PIN-u", async () => {
-  const podszyty = await json(`/api/cards/${TAG}/reads`, { method: "POST", headers: { "content-type": "application/json" },
-    body: JSON.stringify({ by: "ZRM S-04", ctx: "dostęp lekarza" }) });
+test("kontekst odczytu nadaje serwer, dostęp lekarza wymaga konta", async () => {
+  const podszyty = await post(`/api/cards/${TAG}/reads`, { by: "ZRM S-04", ctx: "dostęp lekarza" });
   assert.equal(podszyty.status, 403);
 
-  const zmyslony = await json(`/api/cards/${TAG}/reads`, { method: "POST", headers: { "content-type": "application/json" },
-    body: JSON.stringify({ by: "ZRM S-04", ctx: "kontrola NFZ" }) });
+  const zmyslony = await post(`/api/cards/${TAG}/reads`, { by: "ZRM S-04", ctx: "kontrola NFZ" });
   assert.equal(zmyslony.body.ctx, "odczyt ratunkowy");
 
-  const lekarz = await json(`/api/cards/${TAG}/reads`, { method: "POST",
-    headers: { "content-type": "application/json", "x-hero-pin": PIN },
-    body: JSON.stringify({ by: "dr Tomasz Lewandowski", ctx: "dostęp lekarza" }) });
+  const lekarz = await post(`/api/cards/${TAG}/reads`, { by: "ktoś zupełnie inny", ctx: "cokolwiek" }, TOKEN);
   assert.equal(lekarz.status, 201);
   assert.equal(lekarz.body.ctx, "dostęp lekarza");
+  assert.equal(lekarz.body.by, `${LEKARZ.name}, PWZ ${LEKARZ.pwz}`, "opis bierze się z konta, nie z formularza");
 });
 
 /* Zużywa limit odczytów na całą minutę, więc kolejne testy nie dopisują już do historii. */
@@ -142,7 +152,7 @@ test("podpis z bazy zostaje przy wpisie niezmienionym i znika po edycji", async 
   const tag = "HERO-2000-BB";
   const pin = digest(tag, "4321");
   const signed = { id: "m1", name: "Rywaroksaban", dose: "20 mg", anticoag: true, source: "lekarz" };
-  store.upsert(tag, { pinHash: pin, person: { name: "Anna Nowak" }, meds: [signed] }, pin, { trusted: true });
+  store.cards.upsert(tag, { pinHash: pin, person: { name: "Anna Nowak" }, meds: [signed] }, pin, { trusted: true });
 
   const kept = await put(`/api/cards/${tag}`, { meds: [{ ...signed }] }, pin);
   assert.equal(kept.body.meds[0].source, "lekarz");
@@ -152,6 +162,63 @@ test("podpis z bazy zostaje przy wpisie niezmienionym i znika po edycji", async 
 
   const forged = await put(`/api/cards/${tag}`, { meds: [{ id: "m9", name: "Warfaryna", source: "lekarz" }] }, pin);
   assert.equal(forged.body.meds[0].source, "pacjent");
+});
+
+test("konto lekarza wymaga siedmiu cyfr PWZ, hasła i unikalnego numeru", async () => {
+  assert.equal((await post("/api/doctors", { ...LEKARZ, pwz: "12345" })).status, 400);
+  assert.equal((await post("/api/doctors", { ...LEKARZ, pwz: "7654321", name: "X" })).status, 400);
+  assert.equal((await post("/api/doctors", { ...LEKARZ, pwz: "7654321", password: "krotkie" })).status, 400);
+  assert.equal((await post("/api/doctors", LEKARZ)).status, 409, "numer PWZ jest unikalny");
+
+  const utworzone = await post("/api/doctors", { pwz: "7654321", name: "dr Ewa Nowak", password: "meditag123" });
+  assert.equal(utworzone.status, 201);
+  assert.equal(utworzone.body.pass, undefined, "hasło nie wraca w odpowiedzi");
+});
+
+test("logowanie lekarza: złe hasło odrzucone, dobre daje token i konto", async () => {
+  assert.equal((await post("/api/doctors/session", { pwz: LEKARZ.pwz, password: "nie to" })).status, 403);
+  assert.equal((await post("/api/doctors/session", { pwz: "9999999", password: LEKARZ.password })).status, 403);
+
+  const ja = await json("/api/doctors/me", { headers: { "x-hero-doctor": TOKEN } });
+  assert.equal(ja.status, 200);
+  assert.equal(ja.body.pwz, LEKARZ.pwz);
+  assert.equal((await json("/api/doctors/me", { headers: { "x-hero-doctor": "podrobiony" } })).status, 403);
+});
+
+test("wpis dodany z konta lekarza dostaje podpis z numerem PWZ", async () => {
+  const tag = "HERO-5000-EE";
+  const pin = digest(tag, "4321");
+  const utworzona = await put(`/api/cards/${tag}`, { pinHash: pin, person: { name: "Ewa Lis" },
+    conditions: [{ id: "c1", name: "Cukrzyca typu 2", icd10: "E11", source: "lekarz" }] }, null, TOKEN);
+
+  assert.equal(utworzona.status, 201);
+  assert.equal(utworzona.body.updatedBy, "lekarz");
+  const wpis = utworzona.body.conditions[0];
+  assert.equal(wpis.source, "lekarz");
+  assert.equal(wpis.signedBy.pwz, LEKARZ.pwz);
+  assert.equal(wpis.signedBy.name, LEKARZ.name);
+  assert.match(wpis.signedBy.at, /^\d{4}-\d{2}-\d{2}T/);
+
+  /* Podpis wraca z serwera, więc kolejny zapis tej samej treści go nie rusza. */
+  const bez = await put(`/api/cards/${tag}`, { conditions: [wpis] }, pin);
+  assert.equal(bez.body.conditions[0].signedBy.pwz, LEKARZ.pwz);
+});
+
+test("podpisu nie da się podmienić ani przypisać sobie", async () => {
+  const tag = "HERO-5000-EE";
+  const pin = digest(tag, "4321");
+  const inny = (await post("/api/doctors/session", { pwz: "7654321", password: "meditag123" })).body.token;
+  const { body: karta } = await json(`/api/cards/${tag}`);
+
+  const podmiana = await put(`/api/cards/${tag}`,
+    { conditions: [{ ...karta.conditions[0], signedBy: { name: "dr Nikt", pwz: "0000000" } }] }, pin, inny);
+  assert.equal(podmiana.body.conditions[0].signedBy.pwz, "7654321",
+    "zmieniona treść wpisu dostaje podpis konta, którym idzie zapis, a nie ten z żądania");
+
+  const zdjecie = await put(`/api/cards/${tag}`,
+    { conditions: [{ ...karta.conditions[0], signedBy: undefined, source: "pacjent" }] }, pin);
+  assert.equal(zdjecie.body.conditions[0].source, "pacjent", "bez konta wpis schodzi do pacjenta");
+  assert.equal(zdjecie.body.conditions[0].signedBy, undefined);
 });
 
 test("seria błędnych PIN-ów zamyka próby do tej karty", async () => {

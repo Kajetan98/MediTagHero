@@ -3,6 +3,7 @@ import { readFile, stat } from "node:fs/promises";
 import { join, normalize, extname, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { openDatabase, READ_CTX } from "./db.js";
+import { DoctorStore } from "./doctors.js";
 import { rateLimiter } from "./limit.js";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -61,9 +62,35 @@ export function createServer(store = openDatabase(),
     }
 
     try {
-      if (path === "/api/health") return send(res, 200, { service: "hero", version: 1, cards: store.count() });
+      const doctor = () => store.doctors.bySession(req.headers["x-hero-doctor"]);
+
+      if (path === "/api/health") {
+        return send(res, 200, { service: "hero", version: 2, cards: store.cards.count(), doctors: store.doctors.count() });
+      }
       /* Tylko karty przykładowe — pełna lista jest kluczem do wszystkich odczytów ratunkowych. */
-      if (path === "/api/cards" && req.method === "GET") return send(res, 200, store.list(true));
+      if (path === "/api/cards" && req.method === "GET") return send(res, 200, store.cards.list(true));
+
+      if (path === "/api/doctors" && req.method === "POST") {
+        const out = store.doctors.register(await readJson(req));
+        return out.error ? fail(res, out.status, out.error) : send(res, out.status, out.doctor);
+      }
+      if (path === "/api/doctors/session") {
+        if (req.method === "POST") {
+          /* Ten sam licznik co przy PIN-ie karty: hasło też da się zgadywać. */
+          const key = "doctor:" + (req.socket.remoteAddress || "?");
+          if (pins.blocked(key)) return fail(res, 429, "Za dużo nieudanych prób logowania");
+          const out = store.doctors.login(await readJson(req));
+          if (out.error) { pins.record(key); return fail(res, out.status, out.error); }
+          pins.clear(key);
+          return send(res, 200, { token: out.token, doctor: out.doctor });
+        }
+        if (req.method === "DELETE") { store.doctors.logout(req.headers["x-hero-doctor"]); return send(res, 204); }
+        return fail(res, 405, "Nieobsługiwana metoda");
+      }
+      if (path === "/api/doctors/me" && req.method === "GET") {
+        const kto = doctor();
+        return kto ? send(res, 200, kto) : fail(res, 403, "Nieznana albo wygasła sesja lekarza");
+      }
 
       const m = path.match(/^\/api\/cards\/([^/]+)(\/session|\/reads)?$/);
       if (!m) return fail(res, 404, "Nieznany zasób");
@@ -83,10 +110,10 @@ export function createServer(store = openDatabase(),
         if (req.method !== "POST") return fail(res, 405, "Nieobsługiwana metoda");
         if (pins.blocked(pinKey)) return fail(res, 429, "Za dużo prób PIN-u do tej karty");
         const body = await readJson(req);
-        if (!store.has(tagId)) return fail(res, 404, "Nie ma karty o tym identyfikatorze");
-        if (!store.checkPin(tagId, body.digest)) { pins.record(pinKey); return fail(res, 403, "Nieprawidłowy PIN karty"); }
+        if (!store.cards.has(tagId)) return fail(res, 404, "Nie ma karty o tym identyfikatorze");
+        if (!store.cards.checkPin(tagId, body.digest)) { pins.record(pinKey); return fail(res, 403, "Nieprawidłowy PIN karty"); }
         pins.clear(pinKey);
-        return send(res, 200, store.fullCard(tagId));
+        return send(res, 200, store.cards.fullCard(tagId));
       }
 
       if (sub === "/reads") {
@@ -94,26 +121,28 @@ export function createServer(store = openDatabase(),
         /* Adres jest tym, co widzi proces; za reverse proxy trzeba go tam ograniczyć. */
         if (!reads.allow(req.socket.remoteAddress || "?")) return fail(res, 429, "Za dużo odczytów z tego adresu");
         const body = await readJson(req);
-        /* Dostęp lekarza to wpis o innym ciężarze niż odczyt ratunkowy, więc wymaga PIN-u karty. */
-        if (body.ctx === READ_CTX[1] && !store.checkPin(tagId, req.headers["x-hero-pin"]))
-          return fail(res, 403, "Wpis o dostępie lekarza wymaga PIN-u karty");
-        const entry = store.addRead(tagId, body.by, body.ctx);
+        /* Dostęp lekarza opisuje jego konto, nie pole z formularza — i tylko konto może go zapisać. */
+        const kto = doctor();
+        if (body.ctx === READ_CTX[1] && !kto) return fail(res, 403, "Wpis o dostępie lekarza wymaga konta lekarza");
+        const entry = kto
+          ? store.cards.addRead(tagId, DoctorStore.label(kto), READ_CTX[1])
+          : store.cards.addRead(tagId, body.by, body.ctx);
         return entry ? send(res, 201, entry) : fail(res, 404, "Nie ma karty o tym identyfikatorze");
       }
 
       if (req.method === "GET") {
-        const card = store.publicCard(tagId);
+        const card = store.cards.publicCard(tagId);
         return card ? send(res, 200, card) : fail(res, 404, "Nie ma karty o tym identyfikatorze");
       }
       if (req.method === "PUT") {
         if (pins.blocked(pinKey)) return fail(res, 429, "Za dużo prób PIN-u do tej karty");
         const body = await readJson(req);
-        const out = afterPin(store.upsert(tagId, body, req.headers["x-hero-pin"] || body.pinHash));
+        const out = afterPin(store.cards.upsert(tagId, body, req.headers["x-hero-pin"] || body.pinHash, { doctor: doctor() }));
         return out.error ? fail(res, out.status, out.error) : send(res, out.status, out.card);
       }
       if (req.method === "DELETE") {
         if (pins.blocked(pinKey)) return fail(res, 429, "Za dużo prób PIN-u do tej karty");
-        const out = afterPin(store.remove(tagId, req.headers["x-hero-pin"]));
+        const out = afterPin(store.cards.remove(tagId, req.headers["x-hero-pin"]));
         return out.error ? fail(res, out.status, out.error) : send(res, 204);
       }
       return fail(res, 405, "Nieobsługiwana metoda");

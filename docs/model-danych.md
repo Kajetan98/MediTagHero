@@ -27,6 +27,27 @@ reads (
 )
 ```
 
+### Konta lekarzy
+
+```sql
+doctors (
+  id         TEXT PRIMARY KEY,
+  pwz        TEXT UNIQUE,   -- numer prawa wykonywania zawodu, siedem cyfr
+  name       TEXT,
+  pass       TEXT,          -- scrypt$<sól>$<klucz>
+  created_at TEXT
+)
+
+doctor_sessions (
+  token      TEXT PRIMARY KEY,   -- losowe 24 bajty, nagłówek x-hero-doctor
+  doctor_id  TEXT REFERENCES doctors(id) ON DELETE CASCADE,
+  created_at TEXT
+)
+```
+
+Numer PWZ sprawdzamy wyłącznie co do formatu; cyfra kontrolna i rejestr Naczelnej Izby Lekarskiej
+zostają w planie rozwoju.
+
 ## Karta (JSON)
 
 ```jsonc
@@ -48,7 +69,8 @@ reads (
   "allergies": [{
     "id": "a1", "allergen": "Penicylina", "kind": "lek",   // lek | pokarm | inne
     "reaction": "Obrzęk krtani", "severity": 4,            // 1 łagodna … 4 anafilaksja
-    "source": "lekarz", "note": ""                         // pacjent | lekarz
+    "source": "lekarz", "note": "",                        // pacjent | lekarz
+    "signedBy": { "name": "dr Tomasz Lewandowski", "pwz": "1234567", "at": "2026-02-11T09:20:00.000Z" }
   }],
   "meds": [{
     "id": "m1", "name": "Rywaroksaban", "atc": "B01AF01",
@@ -73,11 +95,17 @@ reads (
 
 ## Decyzje, które warto znać
 
-**`source` na każdym wpisie.** Ratownik musi odróżnić „pacjent tak napisał" od „lekarz to potwierdził".
-Wartości „lekarz" nie nadaje klient: `upsert` w `server/db.js` przepuszcza ją tylko wtedy, gdy wpis
-o tym samym `id` już leżał w bazie z tym podpisem i nie zmienił treści. Każdy nowy lub zmieniony wpis
-dostaje `source: "pacjent"`, `updatedBy` zapisuje się jako „pacjent". Zapis z pominięciem tej reguły
-ma tylko `seed.js` (`upsert` z `{ trusted: true }`), bo nie idzie przez HTTP.
+**`source` i `signedBy` na każdym wpisie.** Ratownik musi odróżnić „pacjent tak napisał" od „lekarz to
+potwierdził", a przy lekarzu wiedzieć który. Żadnego z tych pól nie nadaje klient: `upsert`
+w `server/db.js` bierze podpis z konta, którym uwierzytelniono zapis (nagłówek `x-hero-doctor`).
+Wpis zachowuje podpis, który już ma, tylko gdy identyczny wpis o tym samym `id` leżał z nim w bazie —
+podpis dotyczy treści, więc jej zmiana go unieważnia. Wpis nowy albo zmieniony dostaje podpis konta,
+którym idzie zapis, a bez konta schodzi do `source: "pacjent"` i traci `signedBy`. `updatedBy`
+zapisuje się jako „lekarz" przy koncie i „pacjent" bez konta. Zapis z pominięciem tej reguły ma tylko
+`seed.js` (`upsert` z `{ trusted: true }`), bo nie idzie przez HTTP.
+
+Bez serwera reguły nie ma czym egzekwować. W trybie przeglądarkowym konto lekarza leży w `localStorage`
+pod kluczem `hero.doctors.v1`, a podpis jest etykietą, nie dowodem.
 
 W praktyce znaczy to, że podpis lekarza nie powstaje dziś w ogóle: skoro lekarz uwierzytelnia się
 PIN-em pacjenta, serwer nie ma czym odróżnić jednego od drugiego. Podpis wraca razem z kontami

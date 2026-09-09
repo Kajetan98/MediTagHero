@@ -2,7 +2,8 @@ import { DatabaseSync } from "node:sqlite";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { randomUUID } from "node:crypto";
-import { hashPin, verifyPin } from "./pin.js";
+import { hashSecret, verifySecret } from "./secrets.js";
+import { DoctorStore } from "./doctors.js";
 
 const SECTIONS = ["allergies", "meds", "conditions", "contacts"];
 const READ_LIMIT = 200;
@@ -30,8 +31,24 @@ export function openDatabase(file = process.env.HERO_DB || "data/hero.sqlite") {
       ctx    TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS reads_by_tag ON reads(tag_id, at DESC);
+    CREATE TABLE IF NOT EXISTS doctors (
+      id         TEXT PRIMARY KEY,
+      pwz        TEXT NOT NULL UNIQUE,
+      name       TEXT NOT NULL,
+      pass       TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS doctor_sessions (
+      token      TEXT PRIMARY KEY,
+      doctor_id  TEXT NOT NULL REFERENCES doctors(id) ON DELETE CASCADE,
+      created_at TEXT NOT NULL
+    );
   `);
-  return new CardStore(db);
+  return {
+    cards: new CardStore(db),
+    doctors: new DoctorStore(db),
+    close() { db.close(); },
+  };
 }
 
 const str = v => (typeof v === "string" ? v : v == null ? "" : String(v));
@@ -47,7 +64,6 @@ const same = (a, b) => JSON.stringify(canon(a)) === JSON.stringify(canon(b));
 
 class CardStore {
   constructor(db) { this.db = db; }
-  close() { this.db.close(); }
 
   /** Zestaw jawny: dokładnie to, co ratownik widzi po zbliżeniu opaski. */
   publicCard(tagId) {
@@ -82,21 +98,29 @@ class CardStore {
   checkPin(tagId, digest) {
     const row = this.db.prepare("SELECT pin FROM cards WHERE tag_id = ?").get(tagId);
     if (!row) return false;
-    return verifyPin(digest, row.pin);
+    return verifySecret(digest, row.pin);
   }
 
   /**
-   * Podpisu „lekarz" nie nadaje klient. Wpis zachowuje `source: "lekarz"` tylko wtedy, gdy
-   * identyczny wpis o tym samym `id` już leżał w bazie z tym podpisem — inaczej schodzi do
-   * „pacjent". Dopóki lekarz uwierzytelnia się PIN-em pacjenta, nie ma czym odróżnić jednego
-   * od drugiego; podpis wróci razem z kontami lekarzy (punkt 4 w docs/plan-rozwoju.md).
+   * Podpisu „lekarz" nie nadaje klient — nadaje go serwer z konta, którym uwierzytelniono zapis.
+   * Wpis zachowuje podpis, który już ma, tylko gdy identyczny wpis o tym samym `id` leżał z nim
+   * w bazie: podpis dotyczy treści, więc jej zmiana go unieważnia. Wpis nowy albo zmieniony dostaje
+   * podpis konta, którym idzie zapis, a bez konta schodzi do „pacjent" i traci `signedBy`.
    */
-  #keepSignatures(section, incoming, prev) {
+  #signEntries(section, incoming, prev, doctor, now) {
     const before = new Map(arr(prev && prev[section]).map(e => [str(e && e.id), e]));
+    const podpis = doctor ? { name: doctor.name, pwz: doctor.pwz, at: now } : null;
+
     return incoming.map(entry => {
-      if (!entry || typeof entry !== "object" || entry.source !== "lekarz") return entry;
+      if (!entry || typeof entry !== "object") return entry;
       const old = before.get(str(entry.id));
-      return old && old.source === "lekarz" && same(old, entry) ? entry : { ...entry, source: "pacjent" };
+      if (old && old.source === "lekarz" && same(old, entry)) return entry;
+      if (podpis && entry.source === "lekarz") return { ...entry, source: "lekarz", signedBy: podpis };
+      if (entry.source === "lekarz" || entry.signedBy) {
+        const { signedBy, ...reszta } = entry;
+        return { ...reszta, source: "pacjent" };
+      }
+      return entry;
     });
   }
 
@@ -104,27 +128,28 @@ class CardStore {
    * Tworzy kartę (wymaga pinHash w treści) albo aktualizuje istniejącą.
    * `trusted` omija odsiewanie podpisów i pozwala oznaczyć kartę jako przykładową; jest dla zapisu
    * spoza HTTP (seed) — serwer go nie ustawia, więc żądanie nie założy karty widocznej na liście.
+   * `doctor` to konto uwierzytelnione tokenem sesji: od niego zależy podpis nowych wpisów.
    */
-  upsert(tagId, body, digest, { trusted = false } = {}) {
+  upsert(tagId, body, digest, { trusted = false, doctor = null } = {}) {
     const exists = this.has(tagId);
     if (exists && !this.checkPin(tagId, digest)) return { status: 403, error: "Nieprawidłowy PIN karty" };
     if (!exists && !body.pinHash) return { status: 400, error: "Nowa karta wymaga pola pinHash" };
 
     const person = body.person && typeof body.person === "object" ? body.person : {};
     const prev = exists ? this.publicCard(tagId) : null;
+    const now = new Date().toISOString();
     const data = { person, ...Object.fromEntries(SECTIONS.map(k =>
-      [k, trusted ? arr(body[k]) : this.#keepSignatures(k, arr(body[k]), prev)])) };
+      [k, trusted ? arr(body[k]) : this.#signEntries(k, arr(body[k]), prev, doctor, now)])) };
     const payload = JSON.stringify(data);
     if (payload.length > 256 * 1024) return { status: 413, error: "Karta przekracza 256 kB" };
 
-    const now = new Date().toISOString();
-    const updatedBy = trusted ? str(body.updatedBy) || "pacjent" : "pacjent";
+    const updatedBy = trusted ? str(body.updatedBy) || "pacjent" : (doctor ? "lekarz" : "pacjent");
     if (exists) {
       this.db.prepare("UPDATE cards SET name = ?, data = ?, updated_at = ?, updated_by = ? WHERE tag_id = ?")
         .run(str(person.name), payload, now, updatedBy, tagId);
     } else {
       this.db.prepare("INSERT INTO cards (tag_id, name, pin, data, demo, updated_at, updated_by) VALUES (?, ?, ?, ?, ?, ?, ?)")
-        .run(tagId, str(person.name), hashPin(body.pinHash), payload, trusted && body.demo ? 1 : 0, now, updatedBy);
+        .run(tagId, str(person.name), hashSecret(body.pinHash), payload, trusted && body.demo ? 1 : 0, now, updatedBy);
     }
     return { status: exists ? 200 : 201, card: this.fullCard(tagId) };
   }
