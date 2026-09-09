@@ -185,6 +185,35 @@ test("logowanie lekarza: złe hasło odrzucone, dobre daje token i konto", async
   assert.equal((await json("/api/doctors/me", { headers: { "x-hero-doctor": "podrobiony" } })).status, 403);
 });
 
+test("token sesji leży w bazie jako skrót, a wylogowanie go kasuje", async () => {
+  const wiersze = store.doctors.db.prepare("SELECT token FROM doctor_sessions").all().map(r => r.token);
+  assert.equal(wiersze.includes(TOKEN), false, "sam token nie trafia do bazy");
+  assert.ok(wiersze.every(t => /^[0-9a-f]{64}$/.test(t)), "w bazie leżą skróty SHA-256");
+
+  const { body: sesja } = await post("/api/doctors/session", { pwz: LEKARZ.pwz, password: LEKARZ.password });
+  assert.equal((await json("/api/doctors/me", { headers: { "x-hero-doctor": sesja.token } })).status, 200);
+  assert.equal((await json("/api/doctors/session", { method: "DELETE", headers: { "x-hero-doctor": sesja.token } })).status, 204);
+  assert.equal((await json("/api/doctors/me", { headers: { "x-hero-doctor": sesja.token } })).status, 403);
+});
+
+test("sesja lekarza wygasa po terminie ważności", async () => {
+  const wlasny = openDatabase(":memory:", { sessionTtlMs: 0 });
+  const serwer = createServer(wlasny);
+  await new Promise(r => serwer.listen(0, r));
+  const adres = `http://127.0.0.1:${serwer.address().port}`;
+  const wyslij = (sciezka, opts) => fetch(adres + sciezka, opts);
+
+  await wyslij("/api/doctors", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(LEKARZ) });
+  const logowanie = await (await wyslij("/api/doctors/session", { method: "POST",
+    headers: { "content-type": "application/json" }, body: JSON.stringify({ pwz: LEKARZ.pwz, password: LEKARZ.password }) })).json();
+
+  const odpowiedz = await wyslij("/api/doctors/me", { headers: { "x-hero-doctor": logowanie.token } });
+  assert.equal(odpowiedz.status, 403, "token po terminie nie otwiera konta");
+  assert.equal(wlasny.doctors.db.prepare("SELECT COUNT(*) AS n FROM doctor_sessions").get().n, 0,
+    "wygasła sesja znika z bazy");
+  serwer.close();
+});
+
 test("wpis dodany z konta lekarza dostaje podpis z numerem PWZ", async () => {
   const tag = "HERO-5000-EE";
   const pin = digest(tag, "4321");

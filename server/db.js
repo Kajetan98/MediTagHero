@@ -9,7 +9,7 @@ const SECTIONS = ["allergies", "meds", "conditions", "contacts"];
 const READ_LIMIT = 200;
 export const READ_CTX = ["odczyt ratunkowy", "dostęp lekarza"];
 
-export function openDatabase(file = process.env.HERO_DB || "data/hero.sqlite") {
+export function openDatabase(file = process.env.HERO_DB || "data/hero.sqlite", { sessionTtlMs } = {}) {
   if (file !== ":memory:") mkdirSync(dirname(file), { recursive: true });
   const db = new DatabaseSync(file);
   db.exec("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;");
@@ -41,12 +41,20 @@ export function openDatabase(file = process.env.HERO_DB || "data/hero.sqlite") {
     CREATE TABLE IF NOT EXISTS doctor_sessions (
       token      TEXT PRIMARY KEY,
       doctor_id  TEXT NOT NULL REFERENCES doctors(id) ON DELETE CASCADE,
-      created_at TEXT NOT NULL
+      created_at TEXT NOT NULL,
+      expires_at TEXT NOT NULL DEFAULT ''
     );
   `);
+  /* Bazy sprzed wprowadzenia terminu ważności nie mają kolumny, a ich tokeny leżą jawnym tekstem;
+     kolumna dochodzi, a stare sesje znikają — trzeba zalogować się jeszcze raz. */
+  const kolumny = db.prepare("PRAGMA table_info(doctor_sessions)").all().map(k => k.name);
+  if (!kolumny.includes("expires_at")) {
+    db.exec("ALTER TABLE doctor_sessions ADD COLUMN expires_at TEXT NOT NULL DEFAULT ''");
+    db.exec("DELETE FROM doctor_sessions");
+  }
   return {
     cards: new CardStore(db),
-    doctors: new DoctorStore(db),
+    doctors: new DoctorStore(db, { ttlMs: sessionTtlMs }),
     close() { db.close(); },
   };
 }

@@ -52,8 +52,10 @@ Zostaje:
   źródle, zanim zaczną odrzucać numery: błędny algorytm zablokuje prawdziwych lekarzy.
 - **dostęp nadawany przez pacjenta** — kod jednorazowy z terminem ważności i możliwością odebrania,
   zamiast współdzielenia PIN-u karty.
-- **cykl życia sesji** — tokeny nie wygasają i nie da się wylogować ze wszystkich urządzeń. Limit
-  nieudanych prób logowania już działa, na tym samym liczniku co PIN karty.
+- **cykl życia sesji** — zostaje wylogowanie ze wszystkich urządzeń i lista aktywnych sesji.
+  Wygasanie po 12 godzinach, skrót tokenu w bazie zamiast jawnej wartości i limit nieudanych prób
+  logowania (ten sam licznik co PIN karty) już działają. Do rozstrzygnięcia, czy 12 godzin to
+  właściwy termin dla dyżuru.
 - **historia zmian** — dziś zmiana treści podpisanego wpisu unieważnia podpis i nadaje nowy, więc
   widać ostatniego autora, ale nie poprzednich. Do rozważenia osobny dziennik zmian.
 

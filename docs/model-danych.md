@@ -39,9 +39,11 @@ doctors (
 )
 
 doctor_sessions (
-  token      TEXT PRIMARY KEY,   -- losowe 24 bajty, nagłówek x-hero-doctor
+  token      TEXT PRIMARY KEY,   -- skrót SHA-256 tokenu; sam token (24 losowe bajty) zna wyłącznie
+                                 -- przeglądarka i wysyła go w nagłówku x-hero-doctor
   doctor_id  TEXT REFERENCES doctors(id) ON DELETE CASCADE,
-  created_at TEXT
+  created_at TEXT,
+  expires_at TEXT                -- 12 godzin od zalogowania; po terminie wiersz jest kasowany
 )
 ```
 

@@ -79,6 +79,11 @@ docs/             model danych i plan rozwoju
 | GET | `/api/doctors/me` | nagłówek `x-hero-doctor` | konto z tokenu |
 | DELETE | `/api/doctors/session` | nagłówek `x-hero-doctor` | wylogowuje |
 
+Token sesji lekarza ma 192 losowe bity i trafia do bazy jako skrót SHA-256, więc wyciek bazy nie
+oddaje aktywnych sesji. Sesja wygasa po 12 godzinach: token po terminie jest kasowany przy pierwszej
+próbie użycia, a przeterminowane wiersze sprząta logowanie. Bazy sprzed tej zmiany dostają kolumnę
+`expires_at` przy starcie, a ich dotychczasowe sesje są kasowane — trzeba zalogować się jeszcze raz.
+
 Endpointy oznaczone „—" nie sprawdzają niczego poza poprawnością identyfikatora opaski: treść karty
 pobiera każdy, kto zna identyfikator, i każdy może dopisać wpis do historii odczytów. Karty zwykłej
 nie da się jednak wyszukać — `GET /api/cards` oddaje wyłącznie karty z `demo = 1`, a ten znacznik
@@ -110,7 +115,8 @@ Stan na dziś to działający prototyp, nie system produkcyjny. Przed wdrożenie
   kontrolnej i nie odpytujemy rejestru Naczelnej Izby Lekarskiej, więc konto nie dowodzi uprawnień.
 - **Dostęp lekarza to nadal PIN pacjenta.** Konto dokłada tożsamość i podpis, nie zmienia sposobu
   wchodzenia do karty. Docelowo pacjent nadaje dostęp osobnym kodem, z terminem ważności.
-- **Sesje lekarzy nie wygasają.**
+- **Sesji lekarza nie da się odebrać zdalnie.** Wylogowanie kasuje własny token; nie ma
+  wylogowania ze wszystkich urządzeń ani listy aktywnych sesji.
 - **Opis czytnika w historii jest deklaracją.** Kontekst wpisu nadaje serwer, a dostęp lekarza wymaga
   PIN-u, ale pole „kto odczytał" przy odczycie ratunkowym nadal wypełnia klient. Historia dowodzi,
   że ktoś sięgnął po kartę, nie tego, kto to był; potwierdzi to dopiero uwierzytelnienie czytnika.
