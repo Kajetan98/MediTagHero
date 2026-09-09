@@ -102,5 +102,7 @@ test("kartę usuwa tylko właściciel PIN-u, razem z historią", async () => {
 test("serwer oddaje aplikację pod adresem głównym", async () => {
   const r = await call("/");
   assert.equal(r.status, 200);
-  assert.match(await r.text(), /MediTag HERO/);
+  const html = await r.text();
+  assert.match(html, /<title>HERO<\/title>/);
+  assert.match(html, /Odczyt ratunkowy/);
 });

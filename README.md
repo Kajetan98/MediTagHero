@@ -1,6 +1,7 @@
-# MediTag HERO
+# HERO
 
-**HERO — Health Emergency Read Out.** Karta ratunkowa pacjenta dla opaski NFC MediTag.
+**HERO — Health Emergency Read Out.** Platforma karty ratunkowej dla opaski NFC **MediTag**.
+HERO to nazwa serwisu, MediTag to nazwa produktu noszonego przez pacjenta.
 
 Pacjent i lekarz prowadzą jedną kartę: alergie, przyjmowane leki, choroby przewlekłe, grupa krwi,
 wszczepy, kontakty alarmowe. Ratownik po zbliżeniu telefonu do opaski dostaje zestaw krytyczny
@@ -82,9 +83,19 @@ Stan na dziś to działający prototyp, nie system produkcyjny. Przed wdrożenie
 
 ## Logo
 
-W repozytorium nie ma jeszcze plików z logo. Aplikacja używa zastępczego znaku HERO (SVG w kodzie)
-i odtworzonego zastępczo napisu SPACER w stopce. Wrzuć pliki do `public/logo/` — podmiana to dwa
-miejsca w `web/app.html`: symbol `#i-hero` i element `.spacer-mark`.
+Źródła leżą w katalogu głównym: `Logo_Hero.png`, `Logo_MediTag.png`, `Logo_spacER.png`.
+To kwadraty 1024×1024 z napisem na białym tle, więc do interfejsu trafiają przetworzone:
+
+```bash
+python3 tools/logos.py     # wymaga Pillow
+```
+
+Skrypt zdejmuje białe tło, przycina do napisu, robi wariant z czarnym i z białym tuszem
+(czerwień SPACER zostaje w obu), zapisuje pliki do `public/logo/` i wstawia je jako data URI
+do bloku `LOGOS` w `web/app.html`. Dzięki temu aplikacja zostaje jednym plikiem, a znaki
+przełączają się razem z motywem. Po podmianie plików źródłowych uruchom skrypt jeszcze raz.
+
+Znak HERO stoi w pasku górnym, MediTag na wizualizacji opaski, SPACER w stopce.
 
 ## Licencja
 
