@@ -48,6 +48,17 @@ test("nowa karta powstaje, druga próba bez PIN-u jej nie nadpisze", async () =>
   assert.equal(still.body.person.name, "Jan Kowalski");
 });
 
+test("lista kart oddaje wyłącznie karty przykładowe", async () => {
+  const tag = "HERO-3000-CC";
+  const pin = digest(tag, "4321");
+  store.upsert(tag, { pinHash: pin, demo: true, person: { name: "Karta demo" } }, pin, { trusted: true });
+
+  const { status, body } = await json("/api/cards");
+  assert.equal(status, 200);
+  assert.deepEqual(body.map(c => c.tagId), [tag]);
+  assert.equal((await json("/api/health")).body.cards > body.length, true);
+});
+
 test("odczyt ratunkowy nie wymaga PIN-u i nie ujawnia PIN-u ani historii", async () => {
   const { status, body } = await json(`/api/cards/${TAG}`);
   assert.equal(status, 200);

@@ -11,7 +11,7 @@ cards (
   name       TEXT,               -- zdenormalizowane na potrzeby listy
   pin        TEXT,               -- scrypt$<sól>$<klucz> ze skrótu przysłanego przez przeglądarkę
   data       TEXT,               -- JSON: person, allergies, meds, conditions, contacts
-  demo       INTEGER,            -- 1 dla kart przykładowych
+  demo       INTEGER,            -- 1 dla kart przykładowych; tylko te wychodzą w GET /api/cards
   updated_at TEXT,               -- ISO 8601
   updated_by TEXT                -- 'pacjent' | 'lekarz' | 'przykład'; przysyła je klient
 )

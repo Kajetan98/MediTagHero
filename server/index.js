@@ -58,8 +58,9 @@ export function createServer(store = openDatabase()) {
     }
 
     try {
-      if (path === "/api/health") return send(res, 200, { service: "hero", version: 1, cards: store.list().length });
-      if (path === "/api/cards" && req.method === "GET") return send(res, 200, store.list());
+      if (path === "/api/health") return send(res, 200, { service: "hero", version: 1, cards: store.count() });
+      /* Tylko karty przykładowe — pełna lista jest kluczem do wszystkich odczytów ratunkowych. */
+      if (path === "/api/cards" && req.method === "GET") return send(res, 200, store.list(true));
 
       const m = path.match(/^\/api\/cards\/([^/]+)(\/session|\/reads)?$/);
       if (!m) return fail(res, 404, "Nieznany zasób");

@@ -12,11 +12,11 @@ Zrobione: model karty, trzy role, odczyt ratunkowy z audytem, API na SQLite, tes
 Trzy rzeczy w obecnym kodzie przeczą temu, co obiecuje dokumentacja, i przesądzają o skuteczności
 kolejnych punktów planu.
 
-**Lista kart jest jawna.** `GET /api/cards` oddaje identyfikatory opasek i nazwiska wszystkich kart
-bez uwierzytelnienia. Dopóki tak jest, punkt 3 nic nie zmienia: losowy identyfikator o dowolnej
-długości i tak wydaje jedno żądanie. Endpoint obsługuje wyłącznie ekran startowy demo, więc do
-rozstrzygnięcia: ograniczyć go do kart oznaczonych `demo` albo usunąć razem z listą na stronie
-startowej. `GET /api/health` przy okazji podaje liczbę kart w bazie.
+**Lista kart — zrobione.** `GET /api/cards` oddaje już tylko karty oznaczone `demo`, czyli te
+założone po to, żeby demo miało co pokazać; zwykłej karty nie da się przez API wyszukać.
+`GET /api/health` podaje samą liczbę kart, bez identyfikatorów. Do rozstrzygnięcia zostaje, czy
+przy kontach lekarzy lista kart będzie w ogóle potrzebna, i czy zakładanie karty z `demo = 1` ma
+pozostać decyzją klienta.
 
 **Podpis źródła — zrobione.** Serwer nie przyjmuje już `source: "lekarz"` z żądania: wpis zachowuje
 podpis tylko wtedy, gdy leżał z nim w bazie i nie zmienił treści, a `updatedBy` zapisuje się jako

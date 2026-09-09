@@ -63,16 +63,18 @@ docs/             model danych i plan rozwoju
 | Metoda | Ścieżka | Uwierzytelnienie | Odpowiedź |
 |---|---|---|---|
 | GET | `/api/health` | — | stan usługi i liczba kart w bazie |
-| GET | `/api/cards` | — | lista wszystkich kart (identyfikator, nazwisko, znacznik demo, data zmiany) |
+| GET | `/api/cards` | — | lista kart przykładowych (identyfikator, nazwisko, znacznik demo, data zmiany) |
 | GET | `/api/cards/:tag` | — | treść karty bez historii odczytów i bez skrótu PIN-u |
 | POST | `/api/cards/:tag/session` | `{digest}` | pełna karta z historią odczytów |
 | PUT | `/api/cards/:tag` | nagłówek `x-hero-pin` | zapis karty; gdy karty nie ma w bazie, tworzy ją na podstawie `pinHash` |
 | DELETE | `/api/cards/:tag` | nagłówek `x-hero-pin` | usuwa kartę i jej historię |
 | POST | `/api/cards/:tag/reads` | — | zapisuje odczyt; czas i identyfikator nadaje serwer, opis czytnika podaje klient |
 
-Endpointy oznaczone „—" nie sprawdzają niczego poza poprawnością identyfikatora opaski: listę kart
-i treść pojedynczej karty pobiera każdy, kto ma dostęp do serwera, i każdy może dopisać wpis do
-historii odczytów.
+Endpointy oznaczone „—" nie sprawdzają niczego poza poprawnością identyfikatora opaski: treść karty
+pobiera każdy, kto zna identyfikator, i każdy może dopisać wpis do historii odczytów. Karty zwykłej
+nie da się jednak wyszukać — `GET /api/cards` oddaje wyłącznie karty z `demo = 1`, czyli te, które
+zakładane są po to, żeby demo miało co pokazać. `GET /api/health` podaje samą liczbę kart w bazie,
+bez identyfikatorów.
 
 `GET /api/cards/:tag` oddaje kartę w całości, także rozpoznania ze statusem `przebyta`. Zawężenie do
 zestawu krytycznego robi przeglądarka (`critical()` w `web/app.html`), nie serwer.
@@ -89,9 +91,6 @@ Stan na dziś to działający prototyp, nie system produkcyjny. Przed wdrożenie
 - **Odczyt ratunkowy jest jawny dla każdego, kto zna identyfikator opaski.** To świadoma decyzja
   produktowa — ratownik nie ma czasu na logowanie — ale wymaga długiego, losowego identyfikatora
   (nie sekwencyjnego jak w przykładach) i mechanizmu unieważniania zgubionej opaski.
-- **Lista kart jest jawna.** `GET /api/cards` wydaje identyfikatory i nazwiska wszystkich kart bez
-  uwierzytelnienia, co znosi ochronę wynikającą z długiego identyfikatora. Endpoint obsługuje tylko
-  ekran startowy demo.
 - **Brak kont lekarzy.** Lekarz wchodzi PIN-em pacjenta; docelowo potrzebne konta z numerem PWZ
   i osobne uprawnienia zamiast współdzielonego PIN-u. Do tego czasu podpis lekarza nie powstaje:
   serwer odrzuca `source: "lekarz"` w żądaniu, więc karty prowadzone przez HTTP mają same wpisy

@@ -63,10 +63,18 @@ class CardStore {
     return card;
   }
 
-  list() {
-    return this.db.prepare("SELECT tag_id, name, demo, updated_at FROM cards ORDER BY updated_at DESC").all()
+  /**
+   * Lista kart nie wychodzi na zewnątrz: identyfikator opaski jest jedynym kluczem do odczytu
+   * ratunkowego, więc jej wydanie znosiłoby ochronę wynikającą z długiego identyfikatora.
+   * `demoOnly` zawęża wynik do kart przykładowych i tylko taką listę oddaje API.
+   */
+  list(demoOnly = false) {
+    const where = demoOnly ? "WHERE demo = 1 " : "";
+    return this.db.prepare(`SELECT tag_id, name, demo, updated_at FROM cards ${where}ORDER BY updated_at DESC`).all()
       .map(r => ({ tagId: r.tag_id, name: r.name, demo: !!r.demo, updatedAt: r.updated_at }));
   }
+
+  count() { return this.db.prepare("SELECT COUNT(*) AS n FROM cards").get().n; }
 
   has(tagId) { return !!this.db.prepare("SELECT 1 FROM cards WHERE tag_id = ?").get(tagId); }
 
