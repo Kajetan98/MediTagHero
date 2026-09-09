@@ -13,7 +13,7 @@ cards (
   data       TEXT,               -- JSON: person, allergies, meds, conditions, contacts
   demo       INTEGER,            -- 1 dla kart przykładowych
   updated_at TEXT,               -- ISO 8601
-  updated_by TEXT                -- 'pacjent' | 'lekarz' | 'przykład'
+  updated_by TEXT                -- 'pacjent' | 'lekarz' | 'przykład'; przysyła je klient
 )
 
 reads (
@@ -72,16 +72,31 @@ reads (
 ## Decyzje, które warto znać
 
 **`source` na każdym wpisie.** Ratownik musi odróżnić „pacjent tak napisał" od „lekarz to potwierdził".
-Pole ustawia serwer aplikacji na podstawie roli, w której otwarto kartę, a nie formularz.
+Wartość ustawia przeglądarka z roli, w której otwarto kartę (`renderTab` w `web/app.html`) — nie
+formularz, ale też nie serwer: `upsert` w `server/db.js` zapisuje sekcje karty bez sprawdzania tego
+pola, tak samo jak `updatedBy` przyjmowane z treści żądania. Kto zna PIN karty, może więc oznaczyć
+dowolny wpis jako zweryfikowany przez lekarza. Przeniesienie tej decyzji na serwer to punkt 2
+w `plan-rozwoju.md`; docelowo zastępuje ją podpis konta lekarza (punkt 4).
 
-**`severity` i `anticoag` to pola sterujące widokiem.** Alergia od 3 w górę i każdy antykoagulant
-trafiają do paska flag na górze odczytu ratunkowego. To jedyne miejsce, gdzie dane wpływają na układ ekranu.
+**Część pól steruje układem odczytu ratunkowego.** Do paska flag na górze trafiają: alergia
+o `severity` 3 lub 4, każdy lek z `anticoag`, niepuste `person.devices`, `person.dnr`
+i `person.donor`. Kolejność wpisów też wynika z danych — alergie idą malejąco po `severity`,
+leki z antykoagulantami na początku. `contacts[].primary` dostaje znacznik „pierwszy".
 
-**`status: "przebyta"`** wypada z odczytu ratunkowego (`critical()` po stronie przeglądarki,
-zestaw jawny po stronie serwera), ale zostaje w karcie pacjenta.
+**`status: "przebyta"`** wypada z odczytu ratunkowego, ale zostaje w karcie pacjenta. Filtruje
+wyłącznie przeglądarka (`critical()`); `GET /api/cards/:tag` oddaje wszystkie rozpoznania, także
+przebyte. Ekran odczytu ich nie pokaże, samo API — tak.
 
 **Historia odczytów nie wychodzi z zestawu jawnego.** `GET /api/cards/:tag` zwraca kartę bez `reads`
-i bez `pinHash`; historia wymaga PIN-u (`POST /api/cards/:tag/session`).
+i bez `pinHash`; historia wymaga PIN-u (`POST /api/cards/:tag/session`). Dotyczy to trybu z serwerem:
+bez niego aplikacja czyta `localStorage`, gdzie karta leży w całości — razem ze skrótem PIN-u
+i historią — bo dane nie opuszczają jednej przeglądarki.
+
+**Ślad odczytu przyjmuje serwer od każdego.** `POST /api/cards/:tag/reads` wymaga tylko istniejącego
+identyfikatora opaski, a opis czytnika (`by`) i kontekst (`ctx`) podaje klient. Wpisy w historii są
+więc dowodem, że ktoś sięgnął po kartę, ale nie dowodem, kto to był.
 
 **Identyfikatory wpisów nadaje przeglądarka** (`Math.random`), bo wpisy nie wychodzą poza jedną kartę.
-Identyfikatory odczytów nadaje serwer (`randomUUID`), bo są dowodem dostępu.
+Identyfikatory odczytów nadaje serwer (`randomUUID`), bo są dowodem dostępu — poza trybem bez
+serwera i sytuacją, w której zapis odczytu nie dochodzi; wtedy identyfikator i czas pochodzą
+z przeglądarki.
