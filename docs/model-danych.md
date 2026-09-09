@@ -22,7 +22,8 @@ reads (
   tag_id TEXT REFERENCES cards(tag_id) ON DELETE CASCADE,
   at     TEXT,   -- czas nadany przez serwer, nie przez klienta
   "by"   TEXT,   -- opis czytnika, np. "ZRM P-12"
-  ctx    TEXT    -- 'odczyt ratunkowy' | 'dostęp lekarza'
+  ctx    TEXT    -- 'odczyt ratunkowy' | 'dostęp lekarza'; nadaje serwer, wartość spoza tych dwóch
+                 -- schodzi do odczytu ratunkowego
 )
 ```
 
@@ -98,9 +99,12 @@ i bez `pinHash`; historia wymaga PIN-u (`POST /api/cards/:tag/session`). Dotyczy
 bez niego aplikacja czyta `localStorage`, gdzie karta leży w całości — razem ze skrótem PIN-u
 i historią — bo dane nie opuszczają jednej przeglądarki.
 
-**Ślad odczytu przyjmuje serwer od każdego.** `POST /api/cards/:tag/reads` wymaga tylko istniejącego
-identyfikatora opaski, a opis czytnika (`by`) i kontekst (`ctx`) podaje klient. Wpisy w historii są
-więc dowodem, że ktoś sięgnął po kartę, ale nie dowodem, kto to był.
+**Ślad odczytu ratunkowego zapisze każdy, kto zna identyfikator opaski** — inaczej nie da się go
+pogodzić z odczytem bez logowania. Serwer ogranicza to z trzech stron: `ctx` bierze z zamkniętej
+listy (`READ_CTX`), wpis o dostępie lekarza przyjmuje wyłącznie z PIN-em karty, a liczbę żądań
+z jednego adresu tnie limit z `server/limit.js`. Historia karty trzyma ostatnie 200 wpisów, starsze
+kasuje się przy zapisie. Opis czytnika (`by`) zostaje deklaracją klienta — potwierdzi go dopiero
+uwierzytelnienie czytnika (punkt 4 w `plan-rozwoju.md`).
 
 **Identyfikatory wpisów nadaje przeglądarka** (`Math.random`), bo wpisy nie wychodzą poza jedną kartę.
 Identyfikatory odczytów nadaje serwer (`randomUUID`), bo są dowodem dostępu — poza trybem bez

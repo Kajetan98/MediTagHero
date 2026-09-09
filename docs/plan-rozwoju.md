@@ -23,10 +23,11 @@ podpis tylko wtedy, gdy leżał z nim w bazie i nie zmienił treści, a `updated
 „pacjent" (`server/db.js`). Kosztem jest to, że podpis lekarza dziś nie powstaje — wraca razem
 z kontami lekarzy (punkt 4), już jako podpis konta, nie pole w żądaniu.
 
-**Ślad odczytu przyjmuje każdy.** `POST /api/cards/:tag/reads` nie wymaga niczego poza istniejącym
-identyfikatorem, a opis czytnika podaje klient. Historia ma być dowodem dostępu, a da się ją
-zapełnić wpisami podszywającymi się pod dowolny zespół ratownictwa. Minimum to limit żądań na adres
-IP i oznaczanie wpisów niepotwierdzonych; docelowo odczyt wiąże się z uwierzytelnieniem czytnika.
+**Ślad odczytu — częściowo zrobione.** Kontekst wpisu nadaje serwer z zamkniętej listy, dostęp
+lekarza wymaga PIN-u karty, żądania z jednego adresu tnie limit (30 na minutę, licznik w pamięci
+procesu), a historia karty trzyma ostatnie 200 wpisów. Zostaje opis czytnika, który przy odczycie
+ratunkowym nadal jest deklaracją klienta: potwierdzi go dopiero uwierzytelnienie czytnika (punkt 4).
+Sam limit trzeba przenieść na wspólny magazyn, gdy serwer przestanie być jedną instancją.
 
 ## 3. Identyfikator opaski
 

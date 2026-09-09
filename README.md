@@ -51,6 +51,7 @@ public/           artefakt builda, serwowany przez serwer
 server/index.js   serwer HTTP i routing
 server/db.js      schemat SQLite i operacje na kartach
 server/pin.js     scrypt na skrócie PIN-u
+server/limit.js   licznik żądań w oknie czasu
 server/seed.js    przykładowa karta
 test/api.test.js  testy API
 docs/             model danych i plan rozwoju
@@ -68,12 +69,14 @@ docs/             model danych i plan rozwoju
 | POST | `/api/cards/:tag/session` | `{digest}` | pełna karta z historią odczytów |
 | PUT | `/api/cards/:tag` | nagłówek `x-hero-pin` | zapis karty; gdy karty nie ma w bazie, tworzy ją na podstawie `pinHash` (bez znacznika demo) |
 | DELETE | `/api/cards/:tag` | nagłówek `x-hero-pin` | usuwa kartę i jej historię |
-| POST | `/api/cards/:tag/reads` | — | zapisuje odczyt; czas i identyfikator nadaje serwer, opis czytnika podaje klient |
+| POST | `/api/cards/:tag/reads` | — dla odczytu ratunkowego, `x-hero-pin` dla dostępu lekarza | zapisuje odczyt; czas, identyfikator i kontekst nadaje serwer, opis czytnika podaje klient |
 
 Endpointy oznaczone „—" nie sprawdzają niczego poza poprawnością identyfikatora opaski: treść karty
 pobiera każdy, kto zna identyfikator, i każdy może dopisać wpis do historii odczytów. Karty zwykłej
 nie da się jednak wyszukać — `GET /api/cards` oddaje wyłącznie karty z `demo = 1`, a ten znacznik
-nadaje tylko `npm run seed`, bo żądanie HTTP go nie ustawia. `GET /api/health` podaje samą liczbę kart w bazie,
+nadaje tylko `npm run seed`, bo żądanie HTTP go nie ustawia. Zapis odczytu jest ograniczony do
+30 żądań na minutę z jednego adresu (`server/limit.js`, licznik w pamięci procesu); powyżej serwer
+odpowiada 429. Za reverse proxy widzi adres proxy, więc limit trzeba postawić także tam. `GET /api/health` podaje samą liczbę kart w bazie,
 bez identyfikatorów.
 
 `GET /api/cards/:tag` oddaje kartę w całości, także rozpoznania ze statusem `przebyta`. Zawężenie do
@@ -95,8 +98,9 @@ Stan na dziś to działający prototyp, nie system produkcyjny. Przed wdrożenie
   i osobne uprawnienia zamiast współdzielonego PIN-u. Do tego czasu podpis lekarza nie powstaje:
   serwer odrzuca `source: "lekarz"` w żądaniu, więc karty prowadzone przez HTTP mają same wpisy
   pacjenta.
-- **Ślad odczytu przyjmuje każdy.** `POST /api/cards/:tag/reads` wymaga samego identyfikatora, a opis
-  czytnika podaje klient. Historia dowodzi, że ktoś sięgnął po kartę, nie tego, kto to był.
+- **Opis czytnika w historii jest deklaracją.** Kontekst wpisu nadaje serwer, a dostęp lekarza wymaga
+  PIN-u, ale pole „kto odczytał" przy odczycie ratunkowym nadal wypełnia klient. Historia dowodzi,
+  że ktoś sięgnął po kartę, nie tego, kto to był; potwierdzi to dopiero uwierzytelnienie czytnika.
 - **Brak limitu prób PIN-u** i brak TLS po stronie serwera (zakładany reverse proxy).
 - **Skrót PIN-u siedzi w `sessionStorage`** na czas sesji przeglądarki.
 - **RODO.** Dane o zdrowiu to szczególna kategoria danych osobowych (art. 9 RODO). Przed produkcją:

@@ -2,7 +2,8 @@ import { createServer as createHttpServer } from "node:http";
 import { readFile, stat } from "node:fs/promises";
 import { join, normalize, extname, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { openDatabase } from "./db.js";
+import { openDatabase, READ_CTX } from "./db.js";
+import { rateLimiter } from "./limit.js";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const PUBLIC = join(ROOT, "public");
@@ -47,7 +48,7 @@ async function serveStatic(res, pathname) {
   }
 }
 
-export function createServer(store = openDatabase()) {
+export function createServer(store = openDatabase(), reads = rateLimiter({ limit: 30, windowMs: 60_000 })) {
   const server = createHttpServer(async (req, res) => {
     const url = new URL(req.url, "http://localhost");
     const path = decodeURIComponent(url.pathname);
@@ -79,7 +80,12 @@ export function createServer(store = openDatabase()) {
 
       if (sub === "/reads") {
         if (req.method !== "POST") return fail(res, 405, "Nieobsługiwana metoda");
+        /* Adres jest tym, co widzi proces; za reverse proxy trzeba go tam ograniczyć. */
+        if (!reads.allow(req.socket.remoteAddress || "?")) return fail(res, 429, "Za dużo odczytów z tego adresu");
         const body = await readJson(req);
+        /* Dostęp lekarza to wpis o innym ciężarze niż odczyt ratunkowy, więc wymaga PIN-u karty. */
+        if (body.ctx === READ_CTX[1] && !store.checkPin(tagId, req.headers["x-hero-pin"]))
+          return fail(res, 403, "Wpis o dostępie lekarza wymaga PIN-u karty");
         const entry = store.addRead(tagId, body.by, body.ctx);
         return entry ? send(res, 201, entry) : fail(res, 404, "Nie ma karty o tym identyfikatorze");
       }

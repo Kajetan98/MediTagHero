@@ -6,6 +6,7 @@ import { hashPin, verifyPin } from "./pin.js";
 
 const SECTIONS = ["allergies", "meds", "conditions", "contacts"];
 const READ_LIMIT = 200;
+export const READ_CTX = ["odczyt ratunkowy", "dostęp lekarza"];
 
 export function openDatabase(file = process.env.HERO_DB || "data/hero.sqlite") {
   if (file !== ":memory:") mkdirSync(dirname(file), { recursive: true });
@@ -136,11 +137,19 @@ class CardStore {
     return { status: 204 };
   }
 
-  /** Ślad odczytu. Czas i identyfikator nadaje serwer, nie klient. */
+  /**
+   * Ślad odczytu. Czas, identyfikator i kontekst nadaje serwer: `ctx` spoza `READ_CTX` schodzi
+   * do odczytu ratunkowego, a historia starsza niż ostatnie `READ_LIMIT` wpisów jest kasowana,
+   * żeby zalewanie karty odczytami nie rosło w nieskończoność. Opis czytnika (`by`) pozostaje
+   * deklaracją klienta — potwierdzi go dopiero uwierzytelnienie czytnika.
+   */
   addRead(tagId, by, ctx) {
     if (!this.has(tagId)) return null;
-    const entry = { id: randomUUID(), at: new Date().toISOString(), by: str(by).slice(0, 120) || "nieznany czytnik", ctx: str(ctx).slice(0, 120) || "odczyt ratunkowy" };
+    const entry = { id: randomUUID(), at: new Date().toISOString(), by: str(by).slice(0, 120) || "nieznany czytnik",
+      ctx: READ_CTX.includes(str(ctx)) ? str(ctx) : READ_CTX[0] };
     this.db.prepare('INSERT INTO reads (id, tag_id, at, "by", ctx) VALUES (?, ?, ?, ?, ?)').run(entry.id, tagId, entry.at, entry.by, entry.ctx);
+    this.db.prepare('DELETE FROM reads WHERE tag_id = ? AND id NOT IN (SELECT id FROM reads WHERE tag_id = ? ORDER BY at DESC LIMIT ?)')
+      .run(tagId, tagId, READ_LIMIT);
     return entry;
   }
 

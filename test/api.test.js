@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { createServer } from "../server/index.js";
 import { openDatabase } from "../server/db.js";
+import { rateLimiter } from "../server/limit.js";
 
 const TAG = "HERO-1000-AA";
 const digest = (tag, pin) => createHash("sha256").update(`hero:${tag}:${pin}`).digest("hex");
@@ -15,7 +16,7 @@ const put = (path, body, pin) => json(path, { method: "PUT", headers: { "content
 
 before(async () => {
   store = openDatabase(":memory:");
-  server = createServer(store);
+  server = createServer(store, rateLimiter({ limit: 12, windowMs: 60_000 }));
   await new Promise(r => server.listen(0, r));
   base = `http://127.0.0.1:${server.address().port}`;
 });
@@ -87,6 +88,32 @@ test("każdy odczyt trafia do historii dostępnej po PIN-ie", async () => {
   assert.equal(session.status, 200);
   assert.equal(session.body.reads.length, 1);
   assert.equal(session.body.reads[0].by, "ZRM P-12");
+});
+
+test("kontekst odczytu nadaje serwer, dostęp lekarza wymaga PIN-u", async () => {
+  const podszyty = await json(`/api/cards/${TAG}/reads`, { method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ by: "ZRM S-04", ctx: "dostęp lekarza" }) });
+  assert.equal(podszyty.status, 403);
+
+  const zmyslony = await json(`/api/cards/${TAG}/reads`, { method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ by: "ZRM S-04", ctx: "kontrola NFZ" }) });
+  assert.equal(zmyslony.body.ctx, "odczyt ratunkowy");
+
+  const lekarz = await json(`/api/cards/${TAG}/reads`, { method: "POST",
+    headers: { "content-type": "application/json", "x-hero-pin": PIN },
+    body: JSON.stringify({ by: "dr Tomasz Lewandowski", ctx: "dostęp lekarza" }) });
+  assert.equal(lekarz.status, 201);
+  assert.equal(lekarz.body.ctx, "dostęp lekarza");
+});
+
+/* Zużywa limit odczytów na całą minutę, więc kolejne testy nie dopisują już do historii. */
+test("zalewanie historii odczytami kończy się odpowiedzią 429", async () => {
+  let last = 201;
+  for (let i = 0; i < 20 && last !== 429; i++) {
+    last = (await json(`/api/cards/${TAG}/reads`, { method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ by: "bot" }) })).status;
+  }
+  assert.equal(last, 429);
 });
 
 test("zły PIN nie otwiera karty, nieznana opaska daje 404", async () => {

@@ -345,7 +345,10 @@ const store = {
   async logRead(tagId, by, ctx){
     const payload = {by: by || "nieznany czytnik", ctx: ctx || "odczyt ratunkowy"};
     if(API){
-      const r = await fetch(api("cards/" + encodeURIComponent(tagId) + "/reads"), {method:"POST", headers:{"content-type":"application/json"}, body: JSON.stringify(payload)});
+      /* wpis o dostępie lekarza serwer przyjmuje tylko z PIN-em karty */
+      const headers = {"content-type":"application/json"};
+      if(payload.ctx === "dostęp lekarza" && PIN_DG) headers["x-hero-pin"] = PIN_DG;
+      const r = await fetch(api("cards/" + encodeURIComponent(tagId) + "/reads"), {method:"POST", headers, body: JSON.stringify(payload)});
       if(r.ok) return r.json();
       return Object.assign({id:uid(), at:nowISO()}, payload);
     }
