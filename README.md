@@ -87,7 +87,8 @@ kart w bazie, bez identyfikatorów.
 
 Dwa liczniki w `server/limit.js` (oba w pamięci procesu, oba odpowiadają 429 po przekroczeniu): zapis
 odczytu — 30 żądań na minutę z jednego adresu; próby PIN-u — 10 nieudanych na 15 minut, liczone
-osobno dla pary adres–opaska, a poprawny PIN kasuje licznik. Blokada obejmuje wszystkie ścieżki
+osobno dla pary adres–opaska, a poprawny PIN kasuje licznik. Nieudane logowania lekarza liczy ten sam
+licznik, na osobnym kluczu. Blokada obejmuje wszystkie ścieżki
 z PIN-em: sesję, zapis i usunięcie karty. Za reverse proxy serwer widzi adres proxy, więc limit
 trzeba postawić także tam.
 
@@ -111,9 +112,9 @@ Stan na dziś to działający prototyp, nie system produkcyjny. Przed wdrożenie
 - **Dostęp lekarza to nadal PIN pacjenta.** Konto dokłada tożsamość i podpis, nie zmienia sposobu
   wchodzenia do karty. Docelowo pacjent nadaje dostęp osobnym kodem, z terminem ważności.
 - **Sesje lekarzy nie wygasają.**
-- **Opis czytnika w historii jest deklaracją.** Kontekst wpisu nadaje serwer, a dostęp lekarza wymaga
-  PIN-u, ale pole „kto odczytał" przy odczycie ratunkowym nadal wypełnia klient. Historia dowodzi,
-  że ktoś sięgnął po kartę, nie tego, kto to był; potwierdzi to dopiero uwierzytelnienie czytnika.
+- **Opis czytnika przy odczycie ratunkowym jest deklaracją.** Kontekst wpisu nadaje serwer, a przy
+  dostępie lekarza opis bierze się z konta. Przy odczycie ratunkowym pole „kto odczytał" nadal
+  wypełnia klient: historia dowodzi, że ktoś sięgnął po kartę, nie tego, kto to był.
 - **Brak TLS po stronie serwera** (zakładany reverse proxy). Limit prób PIN-u działa, ale licznik
   żyje w pamięci procesu: restart serwera go zeruje, a przy kilku instancjach każda liczy osobno.
 - **Skrót PIN-u siedzi w `sessionStorage`** na czas sesji przeglądarki.
