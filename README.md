@@ -99,6 +99,21 @@ Znak HERO stoi w pasku górnym, MediTag na wizualizacji opaski, SPACER w stopce.
 w stopce jest odnośnikiem na stronę zespołu; adres jest bezwzględny (`.spacer-link` w `web/app.html`),
 bo ten sam plik chodzi na stronie SPACER, na serwerze HERO i jako Artifact.
 
+## Kroje pisma
+
+Aplikacja używa tych samych krojów co strona SPACER: **Plus Jakarta Sans** i **Space Mono**
+(licencja SIL OFL, treść w `assets/fonts/OFL-*.txt`). Pliki `.woff2` trafiają do `web/app.html`
+jako data URI:
+
+```bash
+node tools/fonts.mjs
+```
+
+Wstawienie w treść, zamiast odnośnika do pliku, wynika z tego, że aplikacja jest jednym plikiem
+i chodzi w trzech miejscach: na stronie SPACER pod `hero-app/`, na serwerze HERO i jako Artifact.
+Ścieżka względna byłaby poprawna tylko w pierwszym z nich, a Artifact wpuszcza wyłącznie kroje
+z Google Fonts. Efekt uboczny: strona nie wysyła żadnego żądania na zewnątrz.
+
 ## Licencja
 
 MIT — patrz `LICENSE`.
