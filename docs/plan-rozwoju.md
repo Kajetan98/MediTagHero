@@ -14,9 +14,9 @@ kolejnych punktów planu.
 
 **Lista kart — zrobione.** `GET /api/cards` oddaje już tylko karty oznaczone `demo`, czyli te
 założone po to, żeby demo miało co pokazać; zwykłej karty nie da się przez API wyszukać.
-`GET /api/health` podaje samą liczbę kart, bez identyfikatorów. Do rozstrzygnięcia zostaje, czy
-przy kontach lekarzy lista kart będzie w ogóle potrzebna, i czy zakładanie karty z `demo = 1` ma
-pozostać decyzją klienta.
+`GET /api/health` podaje samą liczbę kart, bez identyfikatorów. Znacznika `demo` też nie ustawia
+już klient — nadaje go wyłącznie zapis z `trusted`, czyli `seed.js`. Do rozstrzygnięcia zostaje, czy
+przy kontach lekarzy lista kart będzie w ogóle potrzebna.
 
 **Podpis źródła — zrobione.** Serwer nie przyjmuje już `source: "lekarz"` z żądania: wpis zachowuje
 podpis tylko wtedy, gdy leżał z nim w bazie i nie zmienił treści, a `updatedBy` zapisuje się jako

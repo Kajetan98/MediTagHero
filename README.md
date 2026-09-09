@@ -66,14 +66,14 @@ docs/             model danych i plan rozwoju
 | GET | `/api/cards` | — | lista kart przykładowych (identyfikator, nazwisko, znacznik demo, data zmiany) |
 | GET | `/api/cards/:tag` | — | treść karty bez historii odczytów i bez skrótu PIN-u |
 | POST | `/api/cards/:tag/session` | `{digest}` | pełna karta z historią odczytów |
-| PUT | `/api/cards/:tag` | nagłówek `x-hero-pin` | zapis karty; gdy karty nie ma w bazie, tworzy ją na podstawie `pinHash` |
+| PUT | `/api/cards/:tag` | nagłówek `x-hero-pin` | zapis karty; gdy karty nie ma w bazie, tworzy ją na podstawie `pinHash` (bez znacznika demo) |
 | DELETE | `/api/cards/:tag` | nagłówek `x-hero-pin` | usuwa kartę i jej historię |
 | POST | `/api/cards/:tag/reads` | — | zapisuje odczyt; czas i identyfikator nadaje serwer, opis czytnika podaje klient |
 
 Endpointy oznaczone „—" nie sprawdzają niczego poza poprawnością identyfikatora opaski: treść karty
 pobiera każdy, kto zna identyfikator, i każdy może dopisać wpis do historii odczytów. Karty zwykłej
-nie da się jednak wyszukać — `GET /api/cards` oddaje wyłącznie karty z `demo = 1`, czyli te, które
-zakładane są po to, żeby demo miało co pokazać. `GET /api/health` podaje samą liczbę kart w bazie,
+nie da się jednak wyszukać — `GET /api/cards` oddaje wyłącznie karty z `demo = 1`, a ten znacznik
+nadaje tylko `npm run seed`, bo żądanie HTTP go nie ustawia. `GET /api/health` podaje samą liczbę kart w bazie,
 bez identyfikatorów.
 
 `GET /api/cards/:tag` oddaje kartę w całości, także rozpoznania ze statusem `przebyta`. Zawężenie do

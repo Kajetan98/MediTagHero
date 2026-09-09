@@ -53,6 +53,11 @@ test("lista kart oddaje wyłącznie karty przykładowe", async () => {
   const pin = digest(tag, "4321");
   store.upsert(tag, { pinHash: pin, demo: true, person: { name: "Karta demo" } }, pin, { trusted: true });
 
+  const podszyta = "HERO-3001-CD";
+  const created = await put(`/api/cards/${podszyta}`, { pinHash: digest(podszyta, "4321"), demo: true }, null);
+  assert.equal(created.status, 201);
+  assert.equal(created.body.demo, false);
+
   const { status, body } = await json("/api/cards");
   assert.equal(status, 200);
   assert.deepEqual(body.map(c => c.tagId), [tag]);

@@ -101,7 +101,8 @@ class CardStore {
 
   /**
    * Tworzy kartę (wymaga pinHash w treści) albo aktualizuje istniejącą.
-   * `trusted` omija odsiewanie podpisów i jest dla zapisu spoza HTTP (seed) — serwer go nie ustawia.
+   * `trusted` omija odsiewanie podpisów i pozwala oznaczyć kartę jako przykładową; jest dla zapisu
+   * spoza HTTP (seed) — serwer go nie ustawia, więc żądanie nie założy karty widocznej na liście.
    */
   upsert(tagId, body, digest, { trusted = false } = {}) {
     const exists = this.has(tagId);
@@ -122,7 +123,7 @@ class CardStore {
         .run(str(person.name), payload, now, updatedBy, tagId);
     } else {
       this.db.prepare("INSERT INTO cards (tag_id, name, pin, data, demo, updated_at, updated_by) VALUES (?, ?, ?, ?, ?, ?, ?)")
-        .run(tagId, str(person.name), hashPin(body.pinHash), payload, body.demo ? 1 : 0, now, updatedBy);
+        .run(tagId, str(person.name), hashPin(body.pinHash), payload, trusted && body.demo ? 1 : 0, now, updatedBy);
     }
     return { status: exists ? 200 : 201, card: this.fullCard(tagId) };
   }

@@ -12,6 +12,7 @@ cards (
   pin        TEXT,               -- scrypt$<sól>$<klucz> ze skrótu przysłanego przez przeglądarkę
   data       TEXT,               -- JSON: person, allergies, meds, conditions, contacts
   demo       INTEGER,            -- 1 dla kart przykładowych; tylko te wychodzą w GET /api/cards
+                                 -- ustawia je wyłącznie zapis z `trusted`, nie żądanie HTTP
   updated_at TEXT,               -- ISO 8601
   updated_by TEXT                -- 'pacjent' | 'lekarz' | 'przykład'; przysyła je klient
 )
