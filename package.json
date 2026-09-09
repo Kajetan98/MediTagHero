@@ -1,0 +1,15 @@
+{
+  "name": "meditag-hero",
+  "version": "0.1.0",
+  "private": true,
+  "description": "HERO — Health Emergency Read Out. Platforma karty ratunkowej dla opaski MediTag NFC.",
+  "license": "MIT",
+  "type": "module",
+  "engines": { "node": ">=22.5" },
+  "scripts": {
+    "build": "node tools/build.mjs",
+    "start": "npm run build && node --no-warnings server/index.js",
+    "seed": "node --no-warnings server/seed.js",
+    "test": "npm run build && node --no-warnings --test test/*.test.js"
+  }
+}
