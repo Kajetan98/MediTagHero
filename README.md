@@ -11,7 +11,8 @@ Opaska nie przechowuje danych medycznych. Tag NFC zawiera wyłącznie adres kart
 
 ## Uruchomienie
 
-Wymagany Node 22.5 lub nowszy (wbudowany moduł `node:sqlite`). Projekt nie ma zależności z npm.
+Wymagany Node 22.13 lub nowszy: moduł `node:sqlite` istnieje od 22.5, ale do 22.12 włącznie wymaga
+flagi `--experimental-sqlite`, której serwer nie ustawia. Projekt nie ma zależności z npm.
 
 ```bash
 npm start          # buduje public/index.html i startuje serwer na :8080
@@ -54,6 +55,7 @@ server/pin.js     scrypt na skrócie PIN-u
 server/limit.js   licznik żądań w oknie czasu
 server/seed.js    przykładowa karta
 test/api.test.js  testy API
+.github/workflows testy na każdy push i pull request (Node 22.13, 22 i 24)
 docs/             model danych i plan rozwoju
 ```
 

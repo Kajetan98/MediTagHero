@@ -1,0 +1,25 @@
+name: testy
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 22.13 to najstarsza wersja, w której node:sqlite działa bez flagi.
+        node: ["22.13", "22", "24"]
+    name: node ${{ matrix.node }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      # Projekt nie ma zależności z npm, więc nie ma czego instalować.
+      - run: npm test
+      - name: build nie zostawia zmian w public/
+        run: git diff --exit-code -- public/

@@ -107,6 +107,6 @@ odczycie ratunkowym nikt nie sprawdzi u pacjenta.
 - wersjonowanie karty: kto i co zmienił, z możliwością cofnięcia,
 - testy interfejsu. Dziś pokryte jest samo API; `web/app.html` to ponad 800 linii logiki bez
   testów, w tym `critical()`, która decyduje o zawartości odczytu ratunkowego,
-- uruchamianie testów przy każdym push i pull requeście (repozytorium nie ma katalogu `.github`),
+- rozszerzenie CI poza `npm test`: dziś workflow uruchamia same testy API na trzech wersjach Node-a,
 - opis wdrożenia: obraz kontenera i konfiguracja reverse proxy zakładanego w README,
 - lista zależności Pythona dla `tools/logos.py` (skrypt wymaga Pillow).
