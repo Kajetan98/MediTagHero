@@ -7,6 +7,7 @@ import { DoctorStore } from "./doctors.js";
 
 const SECTIONS = ["allergies", "meds", "conditions", "contacts"];
 const READ_LIMIT = 200;
+export const READ_CTX = ["odczyt ratunkowy", "dostęp lekarza"];
 
 export function openDatabase(file = process.env.HERO_DB || "data/hero.sqlite") {
   if (file !== ":memory:") mkdirSync(dirname(file), { recursive: true });
@@ -53,6 +54,14 @@ export function openDatabase(file = process.env.HERO_DB || "data/hero.sqlite") {
 const str = v => (typeof v === "string" ? v : v == null ? "" : String(v));
 const arr = v => (Array.isArray(v) ? v : []);
 
+/** Porównanie treści wpisu niezależne od kolejności kluczy w JSON-ie. */
+const canon = v => {
+  if (Array.isArray(v)) return v.map(canon);
+  if (v && typeof v === "object") return Object.fromEntries(Object.keys(v).sort().map(k => [k, canon(v[k])]));
+  return v;
+};
+const same = (a, b) => JSON.stringify(canon(a)) === JSON.stringify(canon(b));
+
 class CardStore {
   constructor(db) { this.db = db; }
 
@@ -71,10 +80,18 @@ class CardStore {
     return card;
   }
 
-  list() {
-    return this.db.prepare("SELECT tag_id, name, demo, updated_at FROM cards ORDER BY updated_at DESC").all()
+  /**
+   * Lista kart nie wychodzi na zewnątrz: identyfikator opaski jest jedynym kluczem do odczytu
+   * ratunkowego, więc jej wydanie znosiłoby ochronę wynikającą z długiego identyfikatora.
+   * `demoOnly` zawęża wynik do kart przykładowych i tylko taką listę oddaje API.
+   */
+  list(demoOnly = false) {
+    const where = demoOnly ? "WHERE demo = 1 " : "";
+    return this.db.prepare(`SELECT tag_id, name, demo, updated_at FROM cards ${where}ORDER BY updated_at DESC`).all()
       .map(r => ({ tagId: r.tag_id, name: r.name, demo: !!r.demo, updatedAt: r.updated_at }));
   }
+
+  count() { return this.db.prepare("SELECT COUNT(*) AS n FROM cards").get().n; }
 
   has(tagId) { return !!this.db.prepare("SELECT 1 FROM cards WHERE tag_id = ?").get(tagId); }
 
@@ -85,31 +102,54 @@ class CardStore {
   }
 
   /**
-   * Tworzy kartę (wymaga pinHash w treści) albo aktualizuje istniejącą.
-   *
-   * `doctor` to konto uwierzytelnione tokenem sesji, albo null. Od niego zależy
-   * podpis wpisów: nowy wpis dostaje podpis tylko wtedy, gdy zapis idzie z konta
-   * lekarza, a podpis wpisu już zapisanego jest nienaruszalny. Dzięki temu ani
-   * pacjent nie podszyje się pod lekarza, ani jeden lekarz pod drugiego.
+   * Podpisu „lekarz" nie nadaje klient — nadaje go serwer z konta, którym uwierzytelniono zapis.
+   * Wpis zachowuje podpis, który już ma, tylko gdy identyczny wpis o tym samym `id` leżał z nim
+   * w bazie: podpis dotyczy treści, więc jej zmiana go unieważnia. Wpis nowy albo zmieniony dostaje
+   * podpis konta, którym idzie zapis, a bez konta schodzi do „pacjent" i traci `signedBy`.
    */
-  upsert(tagId, body, digest, doctor = null) {
+  #signEntries(section, incoming, prev, doctor, now) {
+    const before = new Map(arr(prev && prev[section]).map(e => [str(e && e.id), e]));
+    const podpis = doctor ? { name: doctor.name, pwz: doctor.pwz, at: now } : null;
+
+    return incoming.map(entry => {
+      if (!entry || typeof entry !== "object") return entry;
+      const old = before.get(str(entry.id));
+      if (old && old.source === "lekarz" && same(old, entry)) return entry;
+      if (podpis && entry.source === "lekarz") return { ...entry, source: "lekarz", signedBy: podpis };
+      if (entry.source === "lekarz" || entry.signedBy) {
+        const { signedBy, ...reszta } = entry;
+        return { ...reszta, source: "pacjent" };
+      }
+      return entry;
+    });
+  }
+
+  /**
+   * Tworzy kartę (wymaga pinHash w treści) albo aktualizuje istniejącą.
+   * `trusted` omija odsiewanie podpisów i pozwala oznaczyć kartę jako przykładową; jest dla zapisu
+   * spoza HTTP (seed) — serwer go nie ustawia, więc żądanie nie założy karty widocznej na liście.
+   * `doctor` to konto uwierzytelnione tokenem sesji: od niego zależy podpis nowych wpisów.
+   */
+  upsert(tagId, body, digest, { trusted = false, doctor = null } = {}) {
     const exists = this.has(tagId);
     if (exists && !this.checkPin(tagId, digest)) return { status: 403, error: "Nieprawidłowy PIN karty" };
     if (!exists && !body.pinHash) return { status: 400, error: "Nowa karta wymaga pola pinHash" };
 
     const person = body.person && typeof body.person === "object" ? body.person : {};
+    const prev = exists ? this.publicCard(tagId) : null;
     const now = new Date().toISOString();
-    const data = { person, ...Object.fromEntries(SECTIONS.map(k => [k, this.#signSection(tagId, body[k], doctor, now)])) };
+    const data = { person, ...Object.fromEntries(SECTIONS.map(k =>
+      [k, trusted ? arr(body[k]) : this.#signEntries(k, arr(body[k]), prev, doctor, now)])) };
     const payload = JSON.stringify(data);
     if (payload.length > 256 * 1024) return { status: 413, error: "Karta przekracza 256 kB" };
 
-    const updatedBy = doctor ? "lekarz" : "pacjent";
+    const updatedBy = trusted ? str(body.updatedBy) || "pacjent" : (doctor ? "lekarz" : "pacjent");
     if (exists) {
       this.db.prepare("UPDATE cards SET name = ?, data = ?, updated_at = ?, updated_by = ? WHERE tag_id = ?")
         .run(str(person.name), payload, now, updatedBy, tagId);
     } else {
       this.db.prepare("INSERT INTO cards (tag_id, name, pin, data, demo, updated_at, updated_by) VALUES (?, ?, ?, ?, ?, ?, ?)")
-        .run(tagId, str(person.name), hashSecret(body.pinHash), payload, body.demo ? 1 : 0, now, updatedBy);
+        .run(tagId, str(person.name), hashSecret(body.pinHash), payload, trusted && body.demo ? 1 : 0, now, updatedBy);
     }
     return { status: exists ? 200 : 201, card: this.fullCard(tagId) };
   }
@@ -122,39 +162,19 @@ class CardStore {
     return { status: 204 };
   }
 
-  /** Podpisy wpisów: zapisane zostają, nowe dostają podpis zalogowanego lekarza. */
-  #signSection(tagId, incoming, doctor, now) {
-    const stored = new Map();
-    const row = this.db.prepare("SELECT data FROM cards WHERE tag_id = ?").get(tagId);
-    if (row) {
-      for (const key of SECTIONS) {
-        for (const e of arr(JSON.parse(row.data)[key])) if (e?.id) stored.set(e.id, e);
-      }
-    }
-    const podpis = doctor ? { name: doctor.name, pwz: doctor.pwz, at: now } : null;
-
-    return arr(incoming).map(raw => {
-      const entry = { ...raw };
-      const prev = entry.id ? stored.get(entry.id) : null;
-      if (prev) {
-        entry.source = prev.source === "lekarz" ? "lekarz" : "pacjent";
-        if (prev.signedBy) entry.signedBy = prev.signedBy; else delete entry.signedBy;
-      } else if (podpis && raw.source === "lekarz") {
-        entry.source = "lekarz";
-        entry.signedBy = podpis;
-      } else {
-        entry.source = "pacjent";
-        delete entry.signedBy;
-      }
-      return entry;
-    });
-  }
-
-  /** Ślad odczytu. Czas i identyfikator nadaje serwer, nie klient. */
+  /**
+   * Ślad odczytu. Czas, identyfikator i kontekst nadaje serwer: `ctx` spoza `READ_CTX` schodzi
+   * do odczytu ratunkowego, a historia starsza niż ostatnie `READ_LIMIT` wpisów jest kasowana,
+   * żeby zalewanie karty odczytami nie rosło w nieskończoność. Opis czytnika (`by`) pozostaje
+   * deklaracją klienta — potwierdzi go dopiero uwierzytelnienie czytnika.
+   */
   addRead(tagId, by, ctx) {
     if (!this.has(tagId)) return null;
-    const entry = { id: randomUUID(), at: new Date().toISOString(), by: str(by).slice(0, 120) || "nieznany czytnik", ctx: str(ctx).slice(0, 120) || "odczyt ratunkowy" };
+    const entry = { id: randomUUID(), at: new Date().toISOString(), by: str(by).slice(0, 120) || "nieznany czytnik",
+      ctx: READ_CTX.includes(str(ctx)) ? str(ctx) : READ_CTX[0] };
     this.db.prepare('INSERT INTO reads (id, tag_id, at, "by", ctx) VALUES (?, ?, ?, ?, ?)').run(entry.id, tagId, entry.at, entry.by, entry.ctx);
+    this.db.prepare('DELETE FROM reads WHERE tag_id = ? AND id NOT IN (SELECT id FROM reads WHERE tag_id = ? ORDER BY at DESC LIMIT ?)')
+      .run(tagId, tagId, READ_LIMIT);
     return entry;
   }
 

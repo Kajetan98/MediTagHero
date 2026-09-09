@@ -11,7 +11,8 @@ Opaska nie przechowuje danych medycznych. Tag NFC zawiera wyłącznie adres kart
 
 ## Uruchomienie
 
-Wymagany Node 22.5 lub nowszy (wbudowany moduł `node:sqlite`). Projekt nie ma zależności z npm.
+Wymagany Node 22.13 lub nowszy: moduł `node:sqlite` istnieje od 22.5, ale do 22.12 włącznie wymaga
+flagi `--experimental-sqlite`, której serwer nie ustawia. Projekt nie ma zależności z npm.
 
 ```bash
 npm start          # buduje public/index.html i startuje serwer na :8080
@@ -22,15 +23,23 @@ npm test           # testy API (node:test)
 Baza powstaje w `data/hero.sqlite`; ścieżkę zmienia zmienna `HERO_DB`, port — `PORT`.
 
 Bez uruchomionego serwera ten sam plik działa samodzielnie: aplikacja wykrywa brak `/api/health`
-i zapisuje karty w `localStorage` przeglądarki. W tym trybie działa jako demo i jako Artifact.
+i zapisuje karty w `localStorage` przeglądarki — razem ze skrótem PIN-u i historią odczytów, bo nic
+nie opuszcza tej jednej przeglądarki. W tym trybie działa jako demo i jako Artifact.
 
 ## Role
 
 | Rola | Czym się uwierzytelnia | Co może |
 |---|---|---|
 | Pacjent | identyfikator opaski + PIN | prowadzi całą kartę, widzi historię odczytów, kasuje kartę |
-| Lekarz | konto z numerem PWZ + identyfikator opaski + PIN pacjenta | dopisuje rozpoznania, leki i alergie; każdy jego wpis niesie nazwisko i numer PWZ |
+| Lekarz | konto z numerem PWZ + identyfikator opaski + PIN pacjenta | ten sam edytor co pacjent, bez usuwania karty; każdy jego wpis niesie nazwisko i numer PWZ |
 | Ratownik | sam identyfikator opaski | odczyt zestawu krytycznego, bez PIN-u; odczyt trafia do historii |
+
+Podpisu lekarza nie nadaje żądanie — nadaje go serwer z konta, którym uwierzytelniono zapis. Wpis
+zachowuje podpis, który już ma, tylko gdy leżał z nim w bazie i nie zmienił treści: podpis dotyczy
+treści, więc jej zmiana go unieważnia. Wpis nowy albo zmieniony dostaje podpis konta, którym idzie
+zapis, a bez konta schodzi do „pacjent" i traci `signedBy`. Wyjątkiem jest `npm run seed`, który pisze
+do bazy z pominięciem tej reguły, i tryb bez serwera, gdzie konto lekarza leży w pamięci przeglądarki
+i podpis jest tylko etykietą.
 
 Kolejność w odczycie ratunkowym jest celowa: najpierw alergie i anafilaksja, potem leki
 (z wyróżnionymi antykoagulantami), choroby aktywne, wszczepy i uwagi, na końcu kontakt alarmowy.
@@ -45,8 +54,10 @@ server/index.js   serwer HTTP i routing
 server/db.js      schemat SQLite i operacje na kartach
 server/doctors.js konta lekarzy, logowanie, sesje
 server/secrets.js scrypt na PIN-ach kart i hasłach lekarzy
-server/seed.js    przykładowa karta
+server/limit.js   licznik żądań w oknie czasu
+server/seed.js    przykładowa karta i konto lekarza
 test/api.test.js  testy API
+.github/workflows testy na każdy push i pull request (Node 22.13, 22 i 24)
 docs/             model danych i plan rozwoju
 ```
 
@@ -56,30 +67,37 @@ docs/             model danych i plan rozwoju
 
 | Metoda | Ścieżka | Uwierzytelnienie | Odpowiedź |
 |---|---|---|---|
-| GET | `/api/health` | — | stan usługi |
-| GET | `/api/cards` | — | lista kart (identyfikator, nazwisko, data zmiany) |
-| GET | `/api/cards/:tag` | — | zestaw jawny (bez PIN-u i bez historii) |
+| GET | `/api/health` | — | stan usługi i liczba kart w bazie |
+| GET | `/api/cards` | — | lista kart przykładowych (identyfikator, nazwisko, znacznik demo, data zmiany) |
+| GET | `/api/cards/:tag` | — | treść karty bez historii odczytów i bez skrótu PIN-u |
 | POST | `/api/cards/:tag/session` | `{digest}` | pełna karta z historią odczytów |
-| PUT | `/api/cards/:tag` | nagłówek `x-hero-pin` | zapis karty; gdy karty nie ma w bazie, tworzy ją na podstawie `pinHash` |
+| PUT | `/api/cards/:tag` | nagłówek `x-hero-pin` | zapis karty; gdy karty nie ma w bazie, tworzy ją na podstawie `pinHash` (bez znacznika demo) |
 | DELETE | `/api/cards/:tag` | nagłówek `x-hero-pin` | usuwa kartę i jej historię |
-| POST | `/api/cards/:tag/reads` | — albo nagłówek `x-hero-doctor` | zapisuje odczyt; czas i identyfikator nadaje serwer, a przy koncie lekarza także opis czytnika |
+| POST | `/api/cards/:tag/reads` | — dla odczytu ratunkowego, `x-hero-doctor` dla dostępu lekarza | zapisuje odczyt; czas, identyfikator i kontekst nadaje serwer, przy koncie lekarza także opis czytnika |
 | POST | `/api/doctors` | — | zakłada konto lekarza (`pwz`, `name`, `password`) |
 | POST | `/api/doctors/session` | `{pwz, password}` | loguje; zwraca token sesji |
 | GET | `/api/doctors/me` | nagłówek `x-hero-doctor` | konto z tokenu |
 | DELETE | `/api/doctors/session` | nagłówek `x-hero-doctor` | wylogowuje |
 
+Endpointy oznaczone „—" nie sprawdzają niczego poza poprawnością identyfikatora opaski: treść karty
+pobiera każdy, kto zna identyfikator, i każdy może dopisać wpis do historii odczytów. Karty zwykłej
+nie da się jednak wyszukać — `GET /api/cards` oddaje wyłącznie karty z `demo = 1`, a ten znacznik
+nadaje tylko `npm run seed`, bo żądanie HTTP go nie ustawia. `GET /api/health` podaje samą liczbę
+kart w bazie, bez identyfikatorów.
+
+Dwa liczniki w `server/limit.js` (oba w pamięci procesu, oba odpowiadają 429 po przekroczeniu): zapis
+odczytu — 30 żądań na minutę z jednego adresu; próby PIN-u — 10 nieudanych na 15 minut, liczone
+osobno dla pary adres–opaska, a poprawny PIN kasuje licznik. Blokada obejmuje wszystkie ścieżki
+z PIN-em: sesję, zapis i usunięcie karty. Za reverse proxy serwer widzi adres proxy, więc limit
+trzeba postawić także tam.
+
+`GET /api/cards/:tag` oddaje kartę w całości, także rozpoznania ze statusem `przebyta`. Zawężenie do
+zestawu krytycznego robi przeglądarka (`critical()` w `web/app.html`), nie serwer.
+
 Przeglądarka nie wysyła PIN-u. Liczy `SHA-256("hero:<tag>:<pin>")`, a serwer przepuszcza ten skrót
-jeszcze raz przez scrypt z losową solą. Hasła lekarzy idą przez scrypt po stronie serwera.
-
-### Podpis lekarza
-
-Wpis dodany z konta lekarza dostaje pole `signedBy` z nazwiskiem, numerem PWZ i czasem. Podpis nadaje
-serwer przy zapisie, na podstawie tokenu sesji — nie przeglądarka. Stąd dwie własności, obie pokryte
-testami: pacjent nie oznaczy swojego wpisu jako lekarskiego, a podpisu już zapisanego wpisu nie da się
-zmienić ani zdjąć, również innym kontem lekarza. Zmiana treści wpisu nie przenosi podpisu.
-
-Bez uruchomionego serwera nie ma czego egzekwować: konto lekarza leży wtedy w pamięci przeglądarki,
-a podpis jest tylko etykietą.
+jeszcze raz przez scrypt z losową solą. Gdy `crypto.subtle` jest niedostępne — a jest tylko
+w bezpiecznym kontekście, więc nie pod zwykłym `http://` spoza localhost — aplikacja schodzi do
+skrótu djb2, który nie jest funkcją kryptograficzną. Do produkcji potrzebny jest TLS, nie ten zapas.
 
 ## Czego ten kod jeszcze nie robi
 
@@ -90,10 +108,14 @@ Stan na dziś to działający prototyp, nie system produkcyjny. Przed wdrożenie
   (nie sekwencyjnego jak w przykładach) i mechanizmu unieważniania zgubionej opaski.
 - **Numer PWZ nie jest weryfikowany.** Sprawdzamy tylko format — siedem cyfr. Nie liczymy cyfry
   kontrolnej i nie odpytujemy rejestru Naczelnej Izby Lekarskiej, więc konto nie dowodzi uprawnień.
-- **Dostęp lekarza to nadal PIN pacjenta.** Docelowo pacjent powinien nadawać dostęp osobnym kodem,
-  z terminem ważności i możliwością odebrania.
-- **Sesje lekarzy nie wygasają** i nie ma limitu prób logowania.
-- **Brak limitu prób PIN-u** i brak TLS po stronie serwera (zakładany reverse proxy).
+- **Dostęp lekarza to nadal PIN pacjenta.** Konto dokłada tożsamość i podpis, nie zmienia sposobu
+  wchodzenia do karty. Docelowo pacjent nadaje dostęp osobnym kodem, z terminem ważności.
+- **Sesje lekarzy nie wygasają.**
+- **Opis czytnika w historii jest deklaracją.** Kontekst wpisu nadaje serwer, a dostęp lekarza wymaga
+  PIN-u, ale pole „kto odczytał" przy odczycie ratunkowym nadal wypełnia klient. Historia dowodzi,
+  że ktoś sięgnął po kartę, nie tego, kto to był; potwierdzi to dopiero uwierzytelnienie czytnika.
+- **Brak TLS po stronie serwera** (zakładany reverse proxy). Limit prób PIN-u działa, ale licznik
+  żyje w pamięci procesu: restart serwera go zeruje, a przy kilku instancjach każda liczy osobno.
 - **Skrót PIN-u siedzi w `sessionStorage`** na czas sesji przeglądarki.
 - **RODO.** Dane o zdrowiu to szczególna kategoria danych osobowych (art. 9 RODO). Przed produkcją:
   ocena skutków dla ochrony danych, szyfrowanie bazy w spoczynku, retencja i eksport danych,

@@ -1,12 +1,11 @@
 #!/usr/bin/env node
 /**
- * Wypełnia bazę przykładową kartą i kontem lekarza, żeby po `npm start` było
- * co odczytać i czym się zalogować.
+ * Wypełnia bazę przykładową kartą i kontem lekarza, żeby po `npm start` było co odczytać
+ * i czym się zalogować.
  *
  * Karta HERO-2481-KX, PIN 1234. Skrót liczony tak samo jak w przeglądarce:
- * SHA-256("hero:<tag>:<pin>").
- * Lekarz: PWZ 1234567, hasło meditag123 — jego podpis trafia na wpisy oznaczone
- * w karcie jako lekarskie.
+ * SHA-256("hero:<tag>:<pin>"). Lekarz: PWZ 1234567, hasło meditag123 — jego podpis trafia
+ * na wpisy oznaczone w karcie jako lekarskie.
  */
 import { createHash } from "node:crypto";
 import { openDatabase } from "./db.js";
@@ -54,11 +53,15 @@ if (!doctor) {
   if (reg.error) { store.close(); console.error("Nie udało się założyć konta lekarza:", reg.error); process.exit(1); }
   doctor = reg.doctor;
 }
+/* Podpis na wpisach przykładowej karty: seed pisze poza HTTP, więc idzie z trusted. */
+const podpis = { name: doctor.name, pwz: doctor.pwz, at: new Date().toISOString() };
+for (const key of ["allergies", "meds", "conditions"]) {
+  for (const e of card[key]) if (e.source === "lekarz") e.signedBy = podpis;
+}
+card.updatedBy = "lekarz";
 
-const out = store.cards.upsert(TAG, card, card.pinHash, doctor);
+const out = store.cards.upsert(TAG, card, card.pinHash, { trusted: true });
 store.close();
 if (out.error) { console.error("Nie udało się dodać karty:", out.error); process.exit(1); }
-
-const podpisane = ["allergies", "meds", "conditions"].reduce((n, k) => n + out.card[k].filter(e => e.signedBy).length, 0);
 console.log(`Karta ${TAG} gotowa (PIN 1234).`);
-console.log(`Konto lekarza ${DOCTOR.name}, PWZ ${DOCTOR.pwz}, hasło ${DOCTOR.password} — podpisanych wpisów: ${podpisane}.`);
+console.log(`Konto lekarza ${DOCTOR.name}, PWZ ${DOCTOR.pwz}, hasło ${DOCTOR.password}.`);
