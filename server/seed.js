@@ -1,7 +1,12 @@
 #!/usr/bin/env node
 /**
- * Wypełnia bazę jedną przykładową kartą, żeby po `npm start` było co odczytać.
- * PIN: 1234. Skrót liczony tak samo jak w przeglądarce: SHA-256("hero:<tag>:<pin>").
+ * Wypełnia bazę przykładową kartą i kontem lekarza, żeby po `npm start` było
+ * co odczytać i czym się zalogować.
+ *
+ * Karta HERO-2481-KX, PIN 1234. Skrót liczony tak samo jak w przeglądarce:
+ * SHA-256("hero:<tag>:<pin>").
+ * Lekarz: PWZ 1234567, hasło meditag123 — jego podpis trafia na wpisy oznaczone
+ * w karcie jako lekarskie.
  */
 import { createHash } from "node:crypto";
 import { openDatabase } from "./db.js";
@@ -40,8 +45,20 @@ const card = {
   ]
 };
 
+const DOCTOR = { pwz: "1234567", name: "dr Tomasz Lewandowski", password: "meditag123" };
+
 const store = openDatabase();
-const out = store.upsert(TAG, card, card.pinHash);
+let doctor = store.doctors.byPwz(DOCTOR.pwz);
+if (!doctor) {
+  const reg = store.doctors.register(DOCTOR);
+  if (reg.error) { store.close(); console.error("Nie udało się założyć konta lekarza:", reg.error); process.exit(1); }
+  doctor = reg.doctor;
+}
+
+const out = store.cards.upsert(TAG, card, card.pinHash, doctor);
 store.close();
 if (out.error) { console.error("Nie udało się dodać karty:", out.error); process.exit(1); }
+
+const podpisane = ["allergies", "meds", "conditions"].reduce((n, k) => n + out.card[k].filter(e => e.signedBy).length, 0);
 console.log(`Karta ${TAG} gotowa (PIN 1234).`);
+console.log(`Konto lekarza ${DOCTOR.name}, PWZ ${DOCTOR.pwz}, hasło ${DOCTOR.password} — podpisanych wpisów: ${podpisane}.`);

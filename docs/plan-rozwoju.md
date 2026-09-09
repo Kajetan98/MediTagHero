@@ -20,12 +20,19 @@ chroniła cokolwiek przed zgadywaniem. Do produkcji:
 
 ## 3. Konta lekarzy
 
-PIN pacjenta jako klucz lekarza to rozwiązanie na demo. Docelowo:
+Zrobione: konto z numerem PWZ i hasłem, logowanie tokenem sesji, podpis wpisu nadawany przez serwer
+(kto, jaki numer PWZ, kiedy), dostęp lekarza w historii opisany kontem zamiast polem z formularza.
 
-- konto lekarza z numerem PWZ i weryfikacją przy rejestracji,
-- dostęp nadawany przez pacjenta (kod jednorazowy, ważny np. 24 h) i odwoływalny,
-- podpis wpisu: kto, kiedy, jakim kontem — zamiast pola `source: "lekarz"`,
-- log dostępów rozdzielony na odczyty ratunkowe i dostępy lekarskie (dziś rozróżnia je tylko `ctx`).
+Zostaje:
+
+- **weryfikacja numeru PWZ** — dziś sprawdzamy wyłącznie format, siedem cyfr. Do domknięcia: cyfra
+  kontrolna oraz sprawdzenie w rejestrze Naczelnej Izby Lekarskiej. Obie rzeczy trzeba potwierdzić przy
+  źródle, zanim zaczną odrzucać numery: błędny algorytm zablokuje prawdziwych lekarzy.
+- **dostęp nadawany przez pacjenta** — kod jednorazowy z terminem ważności i możliwością odebrania,
+  zamiast współdzielenia PIN-u karty.
+- **cykl życia sesji** — wygasanie tokenów, limit prób logowania, wylogowanie ze wszystkich urządzeń.
+- **rola wpisu przy edycji** — dziś podpis zostaje przy autorze wpisu także wtedy, gdy treść zmienia
+  ktoś inny. Do rozważenia osobna historia zmian zamiast jednego podpisu.
 
 ## 4. Zgodność z RODO
 

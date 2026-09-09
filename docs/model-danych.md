@@ -20,8 +20,22 @@ reads (
   id     TEXT PRIMARY KEY,
   tag_id TEXT REFERENCES cards(tag_id) ON DELETE CASCADE,
   at     TEXT,   -- czas nadany przez serwer, nie przez klienta
-  "by"   TEXT,   -- opis czytnika, np. "ZRM P-12"
+  "by"   TEXT,   -- opis czytnika, np. "ZRM P-12"; przy dostępie lekarza z jego konta
   ctx    TEXT    -- 'odczyt ratunkowy' | 'dostęp lekarza'
+)
+
+doctors (
+  id         TEXT PRIMARY KEY,
+  pwz        TEXT UNIQUE,   -- numer prawa wykonywania zawodu, siedem cyfr
+  name       TEXT,
+  pass       TEXT,          -- scrypt$<sól>$<klucz>
+  created_at TEXT
+)
+
+doctor_sessions (
+  token      TEXT PRIMARY KEY,   -- losowe 24 bajty, nagłówek x-hero-doctor
+  doctor_id  TEXT REFERENCES doctors(id) ON DELETE CASCADE,
+  created_at TEXT
 )
 ```
 
@@ -46,7 +60,8 @@ reads (
   "allergies": [{
     "id": "a1", "allergen": "Penicylina", "kind": "lek",   // lek | pokarm | inne
     "reaction": "Obrzęk krtani", "severity": 4,            // 1 łagodna … 4 anafilaksja
-    "source": "lekarz", "note": ""                         // pacjent | lekarz
+    "source": "lekarz", "note": "",                        // pacjent | lekarz
+    "signedBy": { "name": "dr Tomasz Lewandowski", "pwz": "1234567", "at": "2026-02-11T09:20:00.000Z" }
   }],
   "meds": [{
     "id": "m1", "name": "Rywaroksaban", "atc": "B01AF01",
@@ -71,8 +86,14 @@ reads (
 
 ## Decyzje, które warto znać
 
-**`source` na każdym wpisie.** Ratownik musi odróżnić „pacjent tak napisał" od „lekarz to potwierdził".
-Pole ustawia serwer aplikacji na podstawie roli, w której otwarto kartę, a nie formularz.
+**`source` i `signedBy` na każdym wpisie.** Ratownik musi odróżnić „pacjent tak napisał" od „lekarz to
+potwierdził", a przy lekarzu wiedzieć który. Oba pola ustawia serwer przy zapisie, na podstawie tokenu
+sesji lekarza — nigdy formularz. Reguła jest prosta: nowy wpis dostaje podpis tylko wtedy, gdy zapis
+idzie z konta lekarza, a podpis wpisu już zapisanego zostaje nienaruszony, także dla innego lekarza.
+Zmiana treści nie przenosi podpisu: należy on do tego, kto wpis utworzył.
+
+Bez serwera reguły nie ma czym egzekwować. W trybie przeglądarkowym konto lekarza leży w `localStorage`
+pod kluczem `hero.doctors.v1`, a podpis jest etykietą, nie dowodem.
 
 **`severity` i `anticoag` to pola sterujące widokiem.** Alergia od 3 w górę i każdy antykoagulant
 trafiają do paska flag na górze odczytu ratunkowego. To jedyne miejsce, gdzie dane wpływają na układ ekranu.

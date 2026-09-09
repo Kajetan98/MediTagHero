@@ -3,6 +3,7 @@ import { readFile, stat } from "node:fs/promises";
 import { join, normalize, extname, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { openDatabase } from "./db.js";
+import { DoctorStore } from "./doctors.js";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const PUBLIC = join(ROOT, "public");
@@ -58,8 +59,32 @@ export function createServer(store = openDatabase()) {
     }
 
     try {
-      if (path === "/api/health") return send(res, 200, { service: "hero", version: 1, cards: store.list().length });
-      if (path === "/api/cards" && req.method === "GET") return send(res, 200, store.list());
+      const doctor = () => store.doctors.bySession(req.headers["x-hero-doctor"]);
+
+      if (path === "/api/health") {
+        return send(res, 200, { service: "hero", version: 2, cards: store.cards.list().length, doctors: store.doctors.count() });
+      }
+      if (path === "/api/cards" && req.method === "GET") return send(res, 200, store.cards.list());
+
+      if (path === "/api/doctors" && req.method === "POST") {
+        const out = store.doctors.register(await readJson(req));
+        return out.error ? fail(res, out.status, out.error) : send(res, out.status, out.doctor);
+      }
+      if (path === "/api/doctors/session") {
+        if (req.method === "POST") {
+          const out = store.doctors.login(await readJson(req));
+          return out.error ? fail(res, out.status, out.error) : send(res, 200, { token: out.token, doctor: out.doctor });
+        }
+        if (req.method === "DELETE") {
+          store.doctors.logout(req.headers["x-hero-doctor"]);
+          return send(res, 204);
+        }
+        return fail(res, 405, "Nieobsługiwana metoda");
+      }
+      if (path === "/api/doctors/me" && req.method === "GET") {
+        const kto = doctor();
+        return kto ? send(res, 200, kto) : fail(res, 403, "Nieznana albo wygasła sesja lekarza");
+      }
 
       const m = path.match(/^\/api\/cards\/([^/]+)(\/session|\/reads)?$/);
       if (!m) return fail(res, 404, "Nieznany zasób");
@@ -71,29 +96,33 @@ export function createServer(store = openDatabase()) {
       if (sub === "/session") {
         if (req.method !== "POST") return fail(res, 405, "Nieobsługiwana metoda");
         const body = await readJson(req);
-        if (!store.has(tagId)) return fail(res, 404, "Nie ma karty o tym identyfikatorze");
-        if (!store.checkPin(tagId, body.digest)) return fail(res, 403, "Nieprawidłowy PIN karty");
-        return send(res, 200, store.fullCard(tagId));
+        if (!store.cards.has(tagId)) return fail(res, 404, "Nie ma karty o tym identyfikatorze");
+        if (!store.cards.checkPin(tagId, body.digest)) return fail(res, 403, "Nieprawidłowy PIN karty");
+        return send(res, 200, store.cards.fullCard(tagId));
       }
 
       if (sub === "/reads") {
         if (req.method !== "POST") return fail(res, 405, "Nieobsługiwana metoda");
         const body = await readJson(req);
-        const entry = store.addRead(tagId, body.by, body.ctx);
+        // Lekarza opisuje jego konto, nie pole z formularza; ratownik podaje opis czytnika.
+        const kto = doctor();
+        const entry = kto
+          ? store.cards.addRead(tagId, DoctorStore.label(kto), "dostęp lekarza")
+          : store.cards.addRead(tagId, body.by, body.ctx);
         return entry ? send(res, 201, entry) : fail(res, 404, "Nie ma karty o tym identyfikatorze");
       }
 
       if (req.method === "GET") {
-        const card = store.publicCard(tagId);
+        const card = store.cards.publicCard(tagId);
         return card ? send(res, 200, card) : fail(res, 404, "Nie ma karty o tym identyfikatorze");
       }
       if (req.method === "PUT") {
         const body = await readJson(req);
-        const out = store.upsert(tagId, body, req.headers["x-hero-pin"] || body.pinHash);
+        const out = store.cards.upsert(tagId, body, req.headers["x-hero-pin"] || body.pinHash, doctor());
         return out.error ? fail(res, out.status, out.error) : send(res, out.status, out.card);
       }
       if (req.method === "DELETE") {
-        const out = store.remove(tagId, req.headers["x-hero-pin"]);
+        const out = store.cards.remove(tagId, req.headers["x-hero-pin"]);
         return out.error ? fail(res, out.status, out.error) : send(res, 204);
       }
       return fail(res, 405, "Nieobsługiwana metoda");

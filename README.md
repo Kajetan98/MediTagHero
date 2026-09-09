@@ -15,7 +15,7 @@ Wymagany Node 22.5 lub nowszy (wbudowany moduł `node:sqlite`). Projekt nie ma z
 
 ```bash
 npm start          # buduje public/index.html i startuje serwer na :8080
-npm run seed       # dokłada przykładową kartę HERO-2481-KX (PIN 1234)
+npm run seed       # przykładowa karta HERO-2481-KX (PIN 1234) i konto lekarza (PWZ 1234567, hasło meditag123)
 npm test           # testy API (node:test)
 ```
 
@@ -29,7 +29,7 @@ i zapisuje karty w `localStorage` przeglądarki. W tym trybie działa jako demo 
 | Rola | Czym się uwierzytelnia | Co może |
 |---|---|---|
 | Pacjent | identyfikator opaski + PIN | prowadzi całą kartę, widzi historię odczytów, kasuje kartę |
-| Lekarz | identyfikator opaski + PIN pacjenta | dopisuje rozpoznania, leki i alergie; jego wpisy są oznaczone jako zweryfikowane |
+| Lekarz | konto z numerem PWZ + identyfikator opaski + PIN pacjenta | dopisuje rozpoznania, leki i alergie; każdy jego wpis niesie nazwisko i numer PWZ |
 | Ratownik | sam identyfikator opaski | odczyt zestawu krytycznego, bez PIN-u; odczyt trafia do historii |
 
 Kolejność w odczycie ratunkowym jest celowa: najpierw alergie i anafilaksja, potem leki
@@ -43,7 +43,8 @@ tools/build.mjs   opakowuje web/app.html w public/index.html
 public/           artefakt builda, serwowany przez serwer
 server/index.js   serwer HTTP i routing
 server/db.js      schemat SQLite i operacje na kartach
-server/pin.js     scrypt na skrócie PIN-u
+server/doctors.js konta lekarzy, logowanie, sesje
+server/secrets.js scrypt na PIN-ach kart i hasłach lekarzy
 server/seed.js    przykładowa karta
 test/api.test.js  testy API
 docs/             model danych i plan rozwoju
@@ -61,10 +62,24 @@ docs/             model danych i plan rozwoju
 | POST | `/api/cards/:tag/session` | `{digest}` | pełna karta z historią odczytów |
 | PUT | `/api/cards/:tag` | nagłówek `x-hero-pin` | zapis karty; gdy karty nie ma w bazie, tworzy ją na podstawie `pinHash` |
 | DELETE | `/api/cards/:tag` | nagłówek `x-hero-pin` | usuwa kartę i jej historię |
-| POST | `/api/cards/:tag/reads` | — | zapisuje odczyt; czas i identyfikator nadaje serwer |
+| POST | `/api/cards/:tag/reads` | — albo nagłówek `x-hero-doctor` | zapisuje odczyt; czas i identyfikator nadaje serwer, a przy koncie lekarza także opis czytnika |
+| POST | `/api/doctors` | — | zakłada konto lekarza (`pwz`, `name`, `password`) |
+| POST | `/api/doctors/session` | `{pwz, password}` | loguje; zwraca token sesji |
+| GET | `/api/doctors/me` | nagłówek `x-hero-doctor` | konto z tokenu |
+| DELETE | `/api/doctors/session` | nagłówek `x-hero-doctor` | wylogowuje |
 
 Przeglądarka nie wysyła PIN-u. Liczy `SHA-256("hero:<tag>:<pin>")`, a serwer przepuszcza ten skrót
-jeszcze raz przez scrypt z losową solą.
+jeszcze raz przez scrypt z losową solą. Hasła lekarzy idą przez scrypt po stronie serwera.
+
+### Podpis lekarza
+
+Wpis dodany z konta lekarza dostaje pole `signedBy` z nazwiskiem, numerem PWZ i czasem. Podpis nadaje
+serwer przy zapisie, na podstawie tokenu sesji — nie przeglądarka. Stąd dwie własności, obie pokryte
+testami: pacjent nie oznaczy swojego wpisu jako lekarskiego, a podpisu już zapisanego wpisu nie da się
+zmienić ani zdjąć, również innym kontem lekarza. Zmiana treści wpisu nie przenosi podpisu.
+
+Bez uruchomionego serwera nie ma czego egzekwować: konto lekarza leży wtedy w pamięci przeglądarki,
+a podpis jest tylko etykietą.
 
 ## Czego ten kod jeszcze nie robi
 
@@ -73,8 +88,11 @@ Stan na dziś to działający prototyp, nie system produkcyjny. Przed wdrożenie
 - **Odczyt ratunkowy jest jawny dla każdego, kto zna identyfikator opaski.** To świadoma decyzja
   produktowa — ratownik nie ma czasu na logowanie — ale wymaga długiego, losowego identyfikatora
   (nie sekwencyjnego jak w przykładach) i mechanizmu unieważniania zgubionej opaski.
-- **Brak kont lekarzy.** Lekarz wchodzi PIN-em pacjenta; docelowo potrzebne konta z numerem PWZ
-  i osobne uprawnienia zamiast współdzielonego PIN-u.
+- **Numer PWZ nie jest weryfikowany.** Sprawdzamy tylko format — siedem cyfr. Nie liczymy cyfry
+  kontrolnej i nie odpytujemy rejestru Naczelnej Izby Lekarskiej, więc konto nie dowodzi uprawnień.
+- **Dostęp lekarza to nadal PIN pacjenta.** Docelowo pacjent powinien nadawać dostęp osobnym kodem,
+  z terminem ważności i możliwością odebrania.
+- **Sesje lekarzy nie wygasają** i nie ma limitu prób logowania.
 - **Brak limitu prób PIN-u** i brak TLS po stronie serwera (zakładany reverse proxy).
 - **Skrót PIN-u siedzi w `sessionStorage`** na czas sesji przeglądarki.
 - **RODO.** Dane o zdrowiu to szczególna kategoria danych osobowych (art. 9 RODO). Przed produkcją:
