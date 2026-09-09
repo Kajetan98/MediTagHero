@@ -76,12 +76,14 @@ docs/             model danych i plan rozwoju
 Endpointy oznaczone „—" nie sprawdzają niczego poza poprawnością identyfikatora opaski: treść karty
 pobiera każdy, kto zna identyfikator, i każdy może dopisać wpis do historii odczytów. Karty zwykłej
 nie da się jednak wyszukać — `GET /api/cards` oddaje wyłącznie karty z `demo = 1`, a ten znacznik
-nadaje tylko `npm run seed`, bo żądanie HTTP go nie ustawia. Dwa liczniki w `server/limit.js` (oba w pamięci procesu, oba odpowiadają 429 po przekroczeniu):
-zapis odczytu — 30 żądań na minutę z jednego adresu; próby PIN-u — 10 nieudanych na 15 minut,
-liczone osobno dla pary adres–opaska, a poprawny PIN kasuje licznik. Blokada obejmuje wszystkie
-ścieżki z PIN-em: sesję, zapis i usunięcie karty. Za reverse proxy serwer widzi adres proxy, więc
-limit trzeba postawić także tam. `GET /api/health` podaje samą liczbę kart w bazie,
-bez identyfikatorów.
+nadaje tylko `npm run seed`, bo żądanie HTTP go nie ustawia. `GET /api/health` podaje samą liczbę
+kart w bazie, bez identyfikatorów.
+
+Dwa liczniki w `server/limit.js` (oba w pamięci procesu, oba odpowiadają 429 po przekroczeniu): zapis
+odczytu — 30 żądań na minutę z jednego adresu; próby PIN-u — 10 nieudanych na 15 minut, liczone
+osobno dla pary adres–opaska, a poprawny PIN kasuje licznik. Blokada obejmuje wszystkie ścieżki
+z PIN-em: sesję, zapis i usunięcie karty. Za reverse proxy serwer widzi adres proxy, więc limit
+trzeba postawić także tam.
 
 `GET /api/cards/:tag` oddaje kartę w całości, także rozpoznania ze statusem `przebyta`. Zawężenie do
 zestawu krytycznego robi przeglądarka (`critical()` w `web/app.html`), nie serwer.
