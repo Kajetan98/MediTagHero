@@ -133,6 +133,17 @@ z jednego adresu tnie limit z `server/limit.js`. Historia karty trzyma ostatnie 
 kasuje się przy zapisie. Przy dostępie lekarza opis czytnika bierze się z konta; przy odczycie
 ratunkowym zostaje deklaracją klienta — potwierdzi go dopiero uwierzytelnienie czytnika.
 
+**Opaska nosi adres, nie dane.** W tagu leży jeden rekord NDEF typu URL: adres aplikacji
+z identyfikatorem karty w kotwicy (`…/#/t/HERO-2481-KX`). Nic poza tym w opasce nie ma, więc
+zgubiona opaska jest kluczem do odczytu ratunkowego, a nie kopią karty. Trasa siedzi w kotwicy,
+bo ten sam plik chodzi też poza serwerem HERO, gdzie ścieżki nikt nie routuje.
+
+Adres jest jeden dla wszystkich, więc zakres po zbliżeniu wybiera przeglądarka: otwarta sesja
+karty wchodzi prosto do edytora, zalogowane konto lekarza dostaje pytanie o PIN pacjenta, reszta
+odczyt ratunkowy. Identyfikatory opasek otwartych PIN-em pacjenta leżą w `localStorage` pod
+kluczem `hero.owners.v1` — to podpowiedź do wyboru roli, nie uprawnienie: kartę i tak otwiera
+dopiero PIN, a odczyt ratunkowy jest jawny dla każdego, kto zna identyfikator.
+
 **Identyfikatory wpisów nadaje przeglądarka** (`Math.random`), bo wpisy nie wychodzą poza jedną kartę.
 Identyfikatory odczytów nadaje serwer (`randomUUID`), bo są dowodem dostępu — poza trybem bez
 serwera i sytuacją, w której zapis odczytu nie dochodzi; wtedy identyfikator i czas pochodzą

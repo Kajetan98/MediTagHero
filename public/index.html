@@ -214,6 +214,7 @@ td{padding:.45rem .5rem;border-bottom:1px solid var(--line);font-variant-numeric
 .notice{display:flex;gap:.6rem;padding:.7rem .9rem;border-radius:8px;font-size:.88rem;border:1px solid var(--line);background:var(--surface-2);color:var(--ink-2)}
 .notice.warn{border-color:var(--warn);background:var(--warn-soft);color:var(--warn)}
 .notice.crit{border-color:var(--crit);background:var(--crit-soft);color:var(--crit)}
+.notice.ok{border-color:var(--ok);background:var(--ok-soft);color:var(--ok)}
 .notice b{color:inherit}
 .gate{max-width:440px;margin-inline:auto}
 .toast{position:fixed;left:50%;bottom:1.4rem;transform:translateX(-50%);background:var(--ink);color:var(--ground);padding:.55rem 1rem;border-radius:8px;font-size:.9rem;font-weight:600;z-index:99;box-shadow:var(--shadow)}
@@ -295,6 +296,7 @@ function toast(msg){ const t=document.createElement("div"); t.className="toast";
 /* ---------------- storage ---------------- */
 const LS = "hero.cards.v1";
 const LSD = "hero.doctors.v1";
+const LSO = "hero.owners.v1";
 const PWZ_RE = /^[0-9]{7}$/;
 let API = false;      /* true, gdy odpowiada serwer HERO */
 let PIN_DG = null;    /* skrót PIN-u bieżącej sesji, wysyłany przy zapisie */
@@ -315,6 +317,14 @@ function lsAll(){ try { return JSON.parse(localStorage.getItem(LS) || "{}"); } c
 function lsSave(all){ try { localStorage.setItem(LS, JSON.stringify(all)); } catch(e){} }
 function lsDocs(){ try { return JSON.parse(localStorage.getItem(LSD) || "{}"); } catch(e){ return {}; } }
 function lsDocsSave(all){ try { localStorage.setItem(LSD, JSON.stringify(all)); } catch(e){} }
+
+/* Opaski, które ta przeglądarka otwierała PIN-em pacjenta. Podpowiedź do wyboru roli po zbliżeniu
+   opaski, nie uprawnienie: kartę i tak otwiera dopiero PIN. */
+function lsOwners(){ try { const v = JSON.parse(localStorage.getItem(LSO) || "[]"); return Array.isArray(v) ? v : []; } catch(e){ return []; } }
+function ownersSave(list){ try { localStorage.setItem(LSO, JSON.stringify(list)); } catch(e){} }
+const isOwner = tagId => lsOwners().indexOf(tagId) >= 0;
+function markOwner(tagId){ if(!isOwner(tagId)) ownersSave(lsOwners().concat([tagId])); }
+function forgetOwner(tagId){ ownersSave(lsOwners().filter(t => t !== tagId)); }
 
 function blankCard(tagId){
   return { tagId, pinHash:"", demo:false,
@@ -450,6 +460,85 @@ const doctors = {
   }
 };
 
+/* ---------------- opaska NFC ---------------- */
+/* NFC:START — czysta logika adresu opaski; test/nfc.test.js wycina ten blok i sprawdza osobno */
+const TAG_RE = /^[A-Z0-9][A-Z0-9-]{2,31}$/;
+
+/** Adres aplikacji bez nazwy pliku. Ten sam plik chodzi w trzech miejscach, więc bierzemy go z okna. */
+function appBase(loc){
+  const origin = loc && loc.origin && loc.origin !== "null" ? loc.origin : "";
+  if(!origin) return "";
+  return origin + String(loc.pathname || "/").replace(/[^/]*$/, "");
+}
+
+/** Adres zapisywany w opasce. Trasa siedzi w kotwicy, bo ten sam plik chodzi też poza serwerem HERO. */
+function tagUrl(tagId, base){
+  return String(base || "") + "#/t/" + encodeURIComponent(String(tagId || "").toUpperCase());
+}
+
+/** Identyfikator opaski z treści rekordu NDEF: adres karty albo sam identyfikator. */
+function tagFromText(text){
+  const t = String(text == null ? "" : text).trim();
+  const m = t.match(/(?:[#/]t\/|[?&]tag=)([A-Za-z0-9-]{3,32})/);
+  const raw = (m ? m[1] : t).toUpperCase();
+  return TAG_RE.test(raw) ? raw : null;
+}
+/* NFC:END */
+
+/**
+ * Web NFC. Działa w Chrome na Androidzie, wyłącznie w bezpiecznym kontekście i po geście
+ * użytkownika; gdzie indziej konstruktora nie ma i zostaje adres do przepisania ręcznie.
+ * Opaska nosi jeden rekord typu URL — adres karty i nic poza nim.
+ */
+const nfcReady = () => typeof NDEFReader !== "undefined";
+let NFC_CTL = null;
+function nfcStop(){ if(NFC_CTL){ try { NFC_CTL.abort(); } catch(e){} NFC_CTL = null; } }
+function nfcCtl(){ nfcStop(); NFC_CTL = new AbortController(); return NFC_CTL; }
+function nfcErr(e){
+  switch(e && e.name){
+    case "AbortError": return "Przerwano.";
+    case "NotAllowedError": return "Przeglądarka nie dostała zgody na NFC. Zezwól na dostęp i spróbuj ponownie.";
+    case "NotSupportedError": return "To urządzenie nie udostępnia NFC albo moduł jest wyłączony w ustawieniach.";
+    case "NotReadableError": return "Nie udało się sięgnąć do opaski. Sprawdź, czy NFC jest włączone.";
+    case "NetworkError": return "Opaska odsunęła się w trakcie. Przyłóż ją ponownie i przytrzymaj chwilę.";
+    default: return (e && e.message) || "Nie udało się porozumieć z opaską.";
+  }
+}
+function tagFromMessage(msg){
+  const dec = new TextDecoder();
+  for(const r of (msg && msg.records) || []){
+    let tresc = "";
+    try { tresc = dec.decode(r.data); } catch(e){ continue; }
+    const t = tagFromText(tresc);
+    if(t) return t;
+  }
+  return null;
+}
+async function nfcWrite(url){
+  const ctl = nfcCtl();
+  try {
+    await new NDEFReader().write({records:[{recordType:"url", data:url}]}, {signal: ctl.signal});
+    return {ok:true};
+  } catch(e){ return {ok:false, error: nfcErr(e)}; }
+  finally { if(NFC_CTL === ctl) NFC_CTL = null; }
+}
+async function nfcLock(){
+  const ctl = nfcCtl();
+  try { await new NDEFReader().makeReadOnly({signal: ctl.signal}); return {ok:true}; }
+  catch(e){ return {ok:false, error: nfcErr(e)}; }
+  finally { if(NFC_CTL === ctl) NFC_CTL = null; }
+}
+/** Nasłuch trwa do nfcStop(): jedno zbliżenie to jedno wywołanie `onTag`. */
+function nfcScan(onTag){
+  const ctl = nfcCtl();
+  const reader = new NDEFReader();
+  return reader.scan({signal: ctl.signal}).then(() => {
+    reader.onreading = ev => onTag(tagFromMessage(ev.message), ev.serialNumber || "");
+    reader.onreadingerror = () => onTag(null, "");
+    return {ok:true};
+  }, e => ({ok:false, error: nfcErr(e)}));
+}
+
 /* example card, used only to give the prototype something real to show */
 const DEMO_DOC = {pwz:"1234567", name:"dr Tomasz Lewandowski", password:"meditag123"};
 
@@ -578,8 +667,8 @@ async function renderStart(){
   +   '<h2>Jak przebiega zdarzenie</h2>'
   +   '<div class="steps">'
   +     '<div class="step"><span class="n">1</span><div><h3>Pacjent prowadzi kartę</h3><p class="small muted">Sam albo razem z lekarzem wpisuje alergie, leki i choroby. Wpis lekarza niesie jego nazwisko i numer PWZ.</p></div></div>'
-  +     '<div class="step"><span class="n">2</span><div><h3>Opaska nosi identyfikator</h3><p class="small muted">Tag NFC zawiera wyłącznie adres karty — żadnych danych medycznych w pamięci opaski.</p></div></div>'
-  +     '<div class="step"><span class="n">3</span><div><h3>Ratownik odczytuje</h3><p class="small muted">Zbliżenie telefonu otwiera zestaw krytyczny w kolejności istotnej na miejscu zdarzenia. Odczyt jest logowany.</p></div></div>'
+  +     '<div class="step"><span class="n">2</span><div><h3>Opaska nosi identyfikator</h3><p class="small muted">Kartę zapisujesz na opasce jednym zbliżeniem — zakładka „Opaska NFC”. W pamięci opaski zostaje sam adres karty, bez danych medycznych.</p></div></div>'
+  +     '<div class="step"><span class="n">3</span><div><h3>Zbliżenie otwiera kartę</h3><p class="small muted">Zakres zależy od tego, kto zbliżył telefon: ratownik dostaje zestaw krytyczny bez logowania, pacjent i lekarz — pełną kartę po PIN-ie. Każdy odczyt jest logowany.</p></div></div>'
   +   '</div>'
   + '</section>'
 
@@ -595,7 +684,7 @@ async function renderStart(){
   +   '<div class="panel" style="margin-top:.8rem"><div class="panel-b">'
   +   (cards.length
       ? '<div class="scrollx"><table><thead><tr><th>Identyfikator</th><th>Pacjent</th><th>Ostatnia zmiana</th><th></th></tr></thead><tbody>'
-        + cards.map(c => '<tr><td class="mono">'+esc(c.tagId)+(c.demo?' <span class="tag">przykład</span>':"")+'</td><td>'+esc(c.name||"—")+'</td><td>'+esc(fmtDT(c.updatedAt))+'</td><td style="text-align:right"><a class="btn btn-sm" href="#/odczyt?tag='+encodeURIComponent(c.tagId)+'">Odczytaj</a></td></tr>').join("")
+        + cards.map(c => '<tr><td class="mono">'+esc(c.tagId)+(c.demo?' <span class="tag">przykład</span>':"")+'</td><td>'+esc(c.name||"—")+'</td><td>'+esc(fmtDT(c.updatedAt))+'</td><td style="text-align:right"><a class="btn btn-sm" href="#/t/'+encodeURIComponent(c.tagId)+'">Jak po zbliżeniu</a> <a class="btn btn-sm" href="#/odczyt?tag='+encodeURIComponent(c.tagId)+'">Odczytaj</a></td></tr>').join("")
         + '</tbody></table></div>'
       : '<div class="empty">Nie ma jeszcze żadnej karty. Zacznij od „Załóż kartę”.</div>')
   +   '</div></div>'
@@ -664,6 +753,15 @@ function handoverText(card){
   return L.join("\n");
 }
 
+function wireHandover(card){
+  const b = document.getElementById("copyHand");
+  if(!b) return;
+  b.addEventListener("click", async () => {
+    try { await navigator.clipboard.writeText(handoverText(card)); toast("Podsumowanie skopiowane"); }
+    catch(err){ toast("Przeglądarka zablokowała schowek"); }
+  });
+}
+
 async function renderScan(params){
   const pre = params.get("tag") || "";
   view.innerHTML = '<div class="stack" style="max-width:760px;margin-inline:auto">'
@@ -673,11 +771,22 @@ async function renderScan(params){
   +   '<label class="f" style="flex:2 1 220px">Identyfikator opaski<input class="mono" name="tag" placeholder="HERO-0000-XX" value="'+esc(pre)+'" required></label>'
   +   '<label class="f" style="flex:1 1 160px">Kto odczytuje<input name="by" placeholder="ZRM P-12 / SOR"></label>'
   +   '<button class="btn btn-crit" type="submit">Odczytaj kartę</button>'
+  +   (nfcReady() ? '<button class="btn" type="button" id="scanNfc">Odczytaj z opaski</button>' : "")
   + '</form><p class="tiny muted" style="margin-top:.6rem">Odczyt nie wymaga PIN-u i zostaje zapisany w historii karty wraz z podanym opisem czytnika.</p></div></div>'
   + '<div id="scanOut"></div></div>';
 
   const out = document.getElementById("scanOut");
   const form = document.getElementById("scanForm");
+  const nfcBtn = document.getElementById("scanNfc");
+  if(nfcBtn) nfcBtn.addEventListener("click", async () => {
+    out.innerHTML = '<div class="notice"><span>Przyłóż opaskę do telefonu…</span></div>';
+    const r = await nfcScan(tag => {
+      nfcStop();
+      if(!tag){ out.innerHTML = '<div class="notice warn"><span>W tej opasce nie ma adresu karty HERO.</span></div>'; return; }
+      location.hash = "#/t/" + encodeURIComponent(tag);
+    });
+    if(!r.ok) out.innerHTML = '<div class="notice crit"><span>'+esc(r.error)+'</span></div>';
+  });
   form.addEventListener("submit", async e => {
     e.preventDefault();
     const tag = form.tag.value.trim().toUpperCase();
@@ -687,10 +796,7 @@ async function renderScan(params){
     const entry = await store.logRead(tag, by, "odczyt ratunkowy");
     out.innerHTML = readoutHTML(critical(card), entry)
       + '<div class="row" style="margin-top:.8rem"><button class="btn btn-sm" id="copyHand">Skopiuj podsumowanie do przekazania</button></div>';
-    document.getElementById("copyHand").addEventListener("click", async () => {
-      try { await navigator.clipboard.writeText(handoverText(card)); toast("Podsumowanie skopiowane"); }
-      catch(err){ toast("Przeglądarka zablokowała schowek"); }
-    });
+    wireHandover(card);
     out.scrollIntoView({behavior:"smooth", block:"start"});
   });
   if(pre) form.dispatchEvent(new Event("submit"));
@@ -698,12 +804,13 @@ async function renderScan(params){
 
 /* ---------------- card editor ---------------- */
 let CARD = null, ROLE = "pacjent", TAB = "podstawowe", EDIT = {};
-const TABS = [["podstawowe","Dane podstawowe"],["alergie","Alergie"],["leki","Leki"],["choroby","Choroby"],["kontakty","Kontakty"],["historia","Historia odczytów"]];
+const TABS = [["podstawowe","Dane podstawowe"],["alergie","Alergie"],["leki","Leki"],["choroby","Choroby"],["kontakty","Kontakty"],["opaska","Opaska NFC"],["historia","Historia odczytów"]];
 const ROUTES = ["doustnie","podskórnie","dożylnie","domięśniowo","wziewnie","przezskórnie","inne"];
 function opt(list, cur){ return list.map(v => '<option value="'+esc(v)+'"'+(String(cur)===String(v)?" selected":"")+'>'+esc(v)+'</option>').join(""); }
 function genTag(){ const d = String(Math.floor(1000+Math.random()*9000)); const A = "ABCDEFGHJKLMNPRSTUWXZ"; return "HERO-"+d+"-"+A[Math.floor(Math.random()*A.length)]+A[Math.floor(Math.random()*A.length)]; }
 
 function renderEditor(){
+  nfcStop();
   const p = CARD.person || {};
   const isDoc = ROLE === "lekarz";
   view.innerHTML = '<div class="stack">'
@@ -726,7 +833,7 @@ function renderEditor(){
   const dc = document.getElementById("delCard");
   if(dc) dc.addEventListener("click", async () => {
     if(!confirm("Usunąć kartę " + CARD.tagId + " wraz z historią odczytów? Operacji nie da się cofnąć.")) return;
-    await store.remove(CARD.tagId); ses.clear(); CARD = null; toast("Karta usunięta"); location.hash = "#/";
+    await store.remove(CARD.tagId); forgetOwner(CARD.tagId); ses.clear(); CARD = null; toast("Karta usunięta"); location.hash = "#/";
   });
   renderTab();
 }
@@ -767,6 +874,61 @@ async function renderTab(){
         devices:f.devices.value.trim(), note:f.note.value.trim(), donor:f.donor.checked, dnr:f.dnr.checked };
       await persist(); toast("Zapisano"); renderEditor();
     });
+    return;
+  }
+
+  if(TAB === "opaska"){
+    const base = appBase(location);
+    const url = tagUrl(CARD.tagId, base);
+    b.innerHTML = '<div class="stack">'
+    + '<p class="small muted">W opasce zostaje sam adres tej karty, bez danych medycznych. Kto zbliży do niej telefon, otworzy ten adres: pacjent i lekarz trafią na pytanie o PIN, każdy inny na odczyt ratunkowy.</p>'
+    + '<label class="f">Adres zapisywany w opasce<input class="mono" id="nfcUrl" readonly value="'+esc(url)+'"></label>'
+    + '<div class="row">'
+    +   '<button class="btn btn-primary" id="nfcWrite"'+(nfcReady()?"":" disabled")+'>Zapisz kartę na opasce</button>'
+    +   '<button class="btn" id="nfcCheck"'+(nfcReady()?"":" disabled")+'>Sprawdź, co jest na opasce</button>'
+    +   '<button class="btn btn-sm" id="nfcCopy">Skopiuj adres</button>'
+    + '</div>'
+    + '<div id="nfcOut"></div>'
+    + (nfcReady() ? '' : '<div class="notice warn"><span>Ta przeglądarka nie udostępnia Web NFC — zapis działa dziś w Chrome na Androidzie, na stronie otwartej przez HTTPS. Na innym sprzęcie zapisz powyższy adres w opasce dowolną aplikacją do NFC, jako rekord typu URL.</span></div>')
+    + (base ? '' : '<div class="notice warn"><span>Strona jest otwarta z pliku, więc adres nie ma nazwy serwera i telefon ratownika go nie otworzy. Uruchom aplikację przez <span class="mono">npm start</span> albo wystaw ją pod adresem HTTPS.</span></div>')
+    + (API ? '' : '<div class="notice"><span>Karta leży w pamięci tej przeglądarki, nie na serwerze. Opaska zaprowadzi pod ten adres każdy telefon, ale kartę znajdzie pod nim tylko ta przeglądarka. Opaska, która ma zadziałać u ratownika, wymaga serwera HERO.</span></div>')
+    + '<details><summary class="small muted" style="cursor:pointer">Opaska zapisana na stałe</summary>'
+    +   '<p class="small muted" style="margin:.6rem 0">Opaskę można zablokować przed nadpisaniem. Operacji nie da się cofnąć: zablokowanej opaski nie przypiszesz już do innej karty.</p>'
+    +   '<button class="btn btn-sm" id="nfcLock"'+(nfcReady()?"":" disabled")+'>Zabezpiecz opaskę przed zapisem</button>'
+    + '</details>'
+    + '</div>';
+
+    const out = document.getElementById("nfcOut");
+    const info = (cls, txt) => { out.innerHTML = '<div class="notice '+cls+'"><span>'+esc(txt)+'</span></div>'; };
+    document.getElementById("nfcCopy").addEventListener("click", async () => {
+      try { await navigator.clipboard.writeText(url); toast("Adres skopiowany"); }
+      catch(e){ document.getElementById("nfcUrl").select(); toast("Skopiuj zaznaczony adres"); }
+    });
+    if(nfcReady()){
+      document.getElementById("nfcWrite").addEventListener("click", async () => {
+        info("", "Przyłóż opaskę do telefonu i przytrzymaj chwilę…");
+        const r = await nfcWrite(url);
+        if(!r.ok) return info("crit", r.error);
+        info("ok", "Opaska zapisana. Od teraz zbliżenie telefonu otwiera kartę " + CARD.tagId + ".");
+        toast("Opaska zapisana");
+      });
+      document.getElementById("nfcCheck").addEventListener("click", async () => {
+        info("", "Przyłóż opaskę do telefonu…");
+        const r = await nfcScan(znaleziony => {
+          nfcStop();
+          if(!znaleziony) return info("warn", "W opasce nie ma adresu karty HERO. Zapis ją przypisze.");
+          if(znaleziony === CARD.tagId) return info("ok", "W opasce jest ta karta: " + znaleziony + ".");
+          info("warn", "W opasce jest inna karta: " + znaleziony + ". Zapis nadpisze ten adres.");
+        });
+        if(!r.ok) info("crit", r.error);
+      });
+      document.getElementById("nfcLock").addEventListener("click", async () => {
+        if(!confirm("Zabezpieczyć opaskę przed zapisem? Adresu na niej nie da się już potem zmienić.")) return;
+        info("", "Przyłóż opaskę do telefonu…");
+        const r = await nfcLock();
+        info(r.ok ? "ok" : "crit", r.ok ? "Opaska zabezpieczona — zapisanego adresu nie da się już zmienić." : r.error);
+      });
+    }
     return;
   }
 
@@ -895,6 +1057,7 @@ async function renderCardView(){
     const tag = f.tag.value.trim().toUpperCase();
     const r = await store.verify(tag, f.pin.value);
     if(!r.ok){ formErr("openErr", r.reason === "pin" ? "Nieprawidłowy PIN." : "Nie ma karty o tym identyfikatorze."); return; }
+    markOwner(tag);
     CARD = r.card; ROLE = "pacjent"; TAB = "podstawowe"; ses.set({tagId:tag, role:"pacjent", dg:PIN_DG}); renderEditor();
   });
   document.getElementById("fNew").addEventListener("submit", async e => {
@@ -904,8 +1067,12 @@ async function renderCardView(){
     c.person.name = f.name.value.trim();
     c.pinHash = await digest(tag, f.pin.value);
     PIN_DG = c.pinHash;
-    CARD = c; ROLE = "pacjent"; TAB = "podstawowe";
-    await store.save(c); ses.set({tagId:tag, role:"pacjent", dg:PIN_DG});
+    CARD = c; ROLE = "pacjent";
+    /* Karta bez opaski jest tylko adresem, więc zaraz po założeniu wchodzimy w jej zapis. */
+    TAB = "opaska";
+    const zapisana = await store.save(c);
+    if(zapisana && zapisana.tagId) CARD = zapisana;
+    markOwner(tag); ses.set({tagId:tag, role:"pacjent", dg:PIN_DG});
     renderEditor(); toast("Karta " + tag + " utworzona");
   });
 }
@@ -922,8 +1089,9 @@ function wireDocBar(){
   if(b) b.addEventListener("click", async () => { await doctors.logout(); ses.clear(); CARD = null; renderDoctorView(); });
 }
 
-/** Ekran logowania i zakładania konta lekarza. */
-function renderDoctorAuth(){
+/** Ekran logowania i zakładania konta lekarza. `dalej` wraca tam, skąd przyszło żądanie konta. */
+function renderDoctorAuth(dalej){
+  const next = dalej || renderDoctorView;
   view.innerHTML = '<div class="stack" style="max-width:900px;margin-inline:auto">'
   + '<div><p class="eyebrow">Rola: lekarz</p><h1 style="font-size:2rem">Panel lekarza</h1>'
   + '<p class="muted" style="margin-top:.5rem">Konto lekarza służy do podpisywania wpisów: przy każdym rozpoznaniu, leku i alergii, którą dopiszesz, zostaje twoje nazwisko i numer prawa wykonywania zawodu. Ratownik widzi wtedy różnicę między deklaracją pacjenta a wpisem lekarskim.</p></div>'
@@ -947,7 +1115,7 @@ function renderDoctorAuth(){
     e.preventDefault(); const f = e.target;
     const r = await doctors.login({pwz:f.pwz.value, password:f.password.value});
     if(!r.ok){ formErr("loginErr", r.error); return; }
-    renderDoctorView();
+    next();
   });
   document.getElementById("fReg").addEventListener("submit", async e => {
     e.preventDefault(); const f = e.target;
@@ -956,7 +1124,7 @@ function renderDoctorAuth(){
     const zal = await doctors.login({pwz:f.pwz.value, password:f.password.value});
     if(!zal.ok){ formErr("regErr", zal.error); return; }
     toast("Konto założone");
-    renderDoctorView();
+    next();
   });
 }
 
@@ -995,8 +1163,94 @@ async function renderDoctorView(){
   });
 }
 
+/* ---------------- opaska: ekran po zbliżeniu ---------------- */
+/** Przełącznik roli. Adres w opasce jest jeden, więc rolę trzeba dać się zmienić ręcznie. */
+function roleBar(tagId, biezaca){
+  const b = (k, etykieta) => '<a class="btn btn-sm'+(biezaca===k?" btn-primary":"")+'" href="#/t/'+encodeURIComponent(tagId)+'?rola='+k+'">'+etykieta+'</a>';
+  return '<div class="panel"><div class="panel-h">'
+  + '<div><p class="eyebrow">Opaska <span class="mono">'+esc(tagId)+'</span></p><h3>Kto zbliżył opaskę?</h3></div>'
+  + '<div class="row" style="margin-left:auto">'+b("ratownik","Ratownik")+b("lekarz","Lekarz")+b("pacjent","To moja karta")+'</div>'
+  + '</div></div>';
+}
+
+/** Pacjent i lekarz wchodzą do tej samej karty, każde swoim wejściem: PIN otwiera edytor. */
+function tagGate(tagId, rola){
+  const doc = rola === "lekarz";
+  view.innerHTML = '<div class="stack" style="max-width:760px;margin-inline:auto">'
+  + roleBar(tagId, rola)
+  + (doc ? docBar() : "")
+  + '<div class="panel"><div class="panel-h"><h3>'+(doc ? "Otwórz kartę pacjenta" : "Otwórz swoją kartę")+'</h3></div>'
+  + '<div class="panel-b"><form id="fTag" class="stack">'
+  +   '<p class="small muted">'+(doc
+        ? "Karta otwiera się PIN-em pacjenta. Otwarcie trafi do historii razem z twoim nazwiskiem i numerem PWZ, a twoje wpisy dostaną twój podpis."
+        : "PIN otwiera kartę do edycji. Ratownikowi wystarczy sam identyfikator opaski — PIN chroni edycję, nie odczyt ratunkowy.")+'</p>'
+  +   '<label class="f">'+(doc ? "Kod dostępu (PIN pacjenta)" : "PIN")+'<input type="password" name="pin" inputmode="numeric" required></label>'
+  +   '<button class="btn btn-primary" type="submit">Otwórz kartę</button><p id="tagErr" class="tiny" style="color:var(--crit)"></p>'
+  + '</form></div></div></div>';
+
+  if(doc) wireDocBar();
+  document.getElementById("fTag").addEventListener("submit", async e => {
+    e.preventDefault();
+    const r = await store.verify(tagId, e.target.pin.value);
+    if(!r.ok){ formErr("tagErr", r.reason === "pin" ? "Nieprawidłowy PIN." : "Nie ma karty o tym identyfikatorze."); return; }
+    if(doc){
+      const entry = await store.logRead(tagId, DOCTOR.name + ", PWZ " + DOCTOR.pwz, "dostęp lekarza");
+      r.card.reads = [entry].concat(r.card.reads || []);
+    } else markOwner(tagId);
+    CARD = r.card; ROLE = doc ? "lekarz" : "pacjent"; TAB = "podstawowe";
+    ses.set({tagId, role:ROLE, dg:PIN_DG});
+    renderEditor();
+  });
+}
+
+/** Ścieżka ratownika: zestaw krytyczny od razu, bez pytania o cokolwiek. Odczyt idzie do historii. */
+async function tagReadout(tagId){
+  const card = await store.get(tagId);
+  if(!card){
+    view.innerHTML = '<div class="stack" style="max-width:760px;margin-inline:auto">' + roleBar(tagId, "ratownik")
+    + '<div class="notice crit"><span>Opaska <b class="mono">'+esc(tagId)+'</b> wskazuje kartę, której nie ma '
+    + (API ? "w bazie tego serwera." : "w pamięci tej przeglądarki.") + ' Karta mogła zostać usunięta.</span></div></div>';
+    return;
+  }
+  const entry = await store.logRead(tagId, "odczyt po zbliżeniu opaski", "odczyt ratunkowy");
+  view.innerHTML = '<div class="stack">' + roleBar(tagId, "ratownik")
+  + readoutHTML(critical(card), entry)
+  + '<div class="row"><button class="btn btn-sm" id="copyHand">Skopiuj podsumowanie do przekazania</button>'
+  + '<a class="btn btn-sm" href="#/odczyt?tag='+encodeURIComponent(tagId)+'">Odczytaj z opisem czytnika</a></div></div>';
+  wireHandover(card);
+}
+
+/**
+ * Ekran spod adresu zapisanego w opasce. Adres jest jeden, więc o zakresie decyduje to, kto go
+ * otworzył: pacjent z otwartą sesją wchodzi prosto do swojej karty, pacjent i lekarz bez sesji —
+ * po PIN-ie, każdy inny dostaje odczyt ratunkowy. Rozpoznanie roli to podpowiedź z tej
+ * przeglądarki, nie uprawnienie: zakres i tak otwiera dopiero PIN karty.
+ */
+async function renderTagLanding(tagId, params){
+  if(!TAG_RE.test(tagId)){
+    view.innerHTML = '<div class="notice crit"><span>Adres z opaski nie niesie poprawnego identyfikatora karty.</span></div>';
+    return;
+  }
+  view.innerHTML = '<p class="muted">Otwieram kartę z opaski…</p>';
+  await doctors.restore();
+  const s = ses.get();
+  const rola = params.get("rola");
+  const wybor = rola || (s && s.tagId === tagId && s.dg ? s.role : isOwner(tagId) ? "pacjent" : DOCTOR ? "lekarz" : "ratownik");
+
+  /* Otwarta sesja tej samej roli wchodzi do karty bez pytania o PIN drugi raz. */
+  if((wybor === "pacjent" || wybor === "lekarz") && s && s.tagId === tagId && s.role === wybor && s.dg){
+    const r = await store.openWithDigest(tagId, s.dg);
+    if(r.ok){ CARD = r.card; ROLE = wybor; TAB = "podstawowe"; renderEditor(); return; }
+    ses.clear();
+  }
+  if(wybor === "lekarz" && !DOCTOR) return renderDoctorAuth(route);
+  if(wybor === "pacjent" || wybor === "lekarz") return tagGate(tagId, wybor);
+  return tagReadout(tagId);
+}
+
 /* ---------------- router ---------------- */
 async function route(){
+  nfcStop();
   const raw = (location.hash || "#/").slice(1);
   const qi = raw.indexOf("?");
   const path = qi < 0 ? raw : raw.slice(0, qi);
@@ -1008,6 +1262,8 @@ async function route(){
   if(path === "/karta") return renderCardView();
   if(path === "/odczyt") return renderScan(params);
   if(path === "/lekarz") return renderDoctorView();
+  /* Trasa spod adresu zapisanego w opasce: #/t/<identyfikator>. */
+  if(path.indexOf("/t/") === 0) return renderTagLanding(decodeURIComponent(path.slice(3)).trim().toUpperCase(), params);
   return renderStart();
 }
 
