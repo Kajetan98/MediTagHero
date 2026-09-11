@@ -46,6 +46,27 @@ Pod TLS-em serwer dokłada `Strict-Transport-Security`. Nagłówki `Content-Secu
 protokołu. CSP dopuszcza styl i skrypt wstawione w plik, bo aplikacja jest jednym plikiem, ale zamyka
 wszystkie źródła zewnętrzne — strona nie wysyła żadnego żądania poza własny adres.
 
+### Z prawdziwą opaską, krok po kroku
+
+Do zapisania opaski potrzebny jest telefon z Androidem, Chrome i włączonym NFC. Telefon i komputer
+muszą być w tej samej sieci.
+
+1. `npm run cert` — wypisze adres w rodzaju `https://192.168.1.14:8443`. To ten adres wpiszesz
+   w telefonie, a nie `localhost`.
+2. `HERO_TLS_KEY=data/tls/key.pem HERO_TLS_CERT=data/tls/cert.pem npm start`
+3. W telefonie otwórz ten adres i przejdź ostrzeżenie o certyfikacie („Zaawansowane" → „Przejdź do…").
+4. „Moja karta" → „Załóż kartę": nazwisko i PIN. Aplikacja od razu otworzy zakładkę „Opaska NFC"
+   z adresem tej karty i kodem QR.
+5. „Zapisz kartę na opasce" → przyłóż opaskę do telefonu i przytrzymaj. „Sprawdź, co jest na opasce"
+   pokaże, co się zapisało.
+6. Zablokuj ekran, zbliż opaskę: telefon otworzy kartę. Na twoim telefonie zapyta o PIN, bo ta
+   przeglądarka już tę kartę otwierała; na cudzym pokaże odczyt ratunkowy bez pytania o nic.
+
+Jeśli „Zapisz kartę na opasce" jest wyszarzone, powód jest jeden z trzech: strona chodzi po `http://`
+zamiast `https://`, przeglądarka nie jest Chrome na Androidzie, albo moduł NFC jest wyłączony
+w ustawieniach telefonu. Zostaje wtedy kod QR i zapis adresu dowolną aplikacją do NFC jako rekord
+typu URL.
+
 Bez uruchomionego serwera ten sam plik działa samodzielnie: aplikacja wykrywa brak `/api/health`
 i zapisuje karty w `localStorage` przeglądarki — razem ze skrótem PIN-u i historią odczytów, bo nic
 nie opuszcza tej jednej przeglądarki. W tym trybie działa jako demo i jako Artifact.
