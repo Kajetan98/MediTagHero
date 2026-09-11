@@ -19,7 +19,7 @@ flagi `--experimental-sqlite`, której serwer nie ustawia. Projekt nie ma zależ
 npm start          # buduje public/index.html i startuje serwer na :8080
 npm run seed       # przykładowa karta HERO-2481-KX (PIN 1234) i konto lekarza (PWZ 1234567, hasło meditag123)
 npm run cert       # certyfikat samopodpisany do testów po HTTPS (wymaga openssl)
-npm test           # testy API i logiki adresu opaski (node:test)
+npm test           # testy API, identyfikatora opaski i kodera QR (node:test)
 ```
 
 Baza powstaje w `data/hero.sqlite`; ścieżkę zmienia zmienna `HERO_DB`, port — `PORT`.
@@ -188,9 +188,9 @@ kart w bazie, bez identyfikatorów.
 Dwa liczniki w `server/limit.js` (oba w pamięci procesu, oba odpowiadają 429 po przekroczeniu): zapis
 odczytu — 30 żądań na minutę z jednego adresu; próby PIN-u — 10 nieudanych na 15 minut, liczone
 osobno dla pary adres–opaska, a poprawny PIN kasuje licznik. Nieudane logowania lekarza liczy ten sam
-licznik, na osobnym kluczu. Blokada obejmuje wszystkie ścieżki
-z PIN-em: sesję, zapis i usunięcie karty. Za reverse proxy serwer widzi adres proxy, więc limit
-trzeba postawić także tam.
+licznik, na osobnym kluczu. Blokada obejmuje wszystkie ścieżki z PIN-em: sesję, zapis, zmianę PIN-u,
+unieważnienie opaski, przeniesienie karty i jej usunięcie. Za reverse proxy serwer widzi adres proxy,
+więc limit trzeba postawić także tam.
 
 `GET /api/cards/:tag` oddaje kartę w całości, także rozpoznania ze statusem `przebyta`. Zawężenie do
 zestawu krytycznego robi przeglądarka (`critical()` w `web/app.html`), nie serwer.

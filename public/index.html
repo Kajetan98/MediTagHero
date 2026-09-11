@@ -418,7 +418,9 @@ const store = {
   },
   async list(){
     if(API){ const r = await fetch(api("cards")); if(!r.ok) return []; return r.json(); }
-    return Object.values(lsAll()).map(c => ({tagId:c.tagId, name:c.person.name, demo:!!c.demo, updatedAt:c.updatedAt}));
+    /* Unieważnione opaski wypadają z listy tak samo jak na serwerze. */
+    return Object.values(lsAll()).filter(c => !c.revokedAt)
+      .map(c => ({tagId:c.tagId, name:(c.person || {}).name, demo:!!c.demo, updatedAt:c.updatedAt}));
   },
   /* pełna karta wraz z historią — wymaga PIN-u */
   async openWithDigest(tagId, dg){
