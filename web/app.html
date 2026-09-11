@@ -135,6 +135,12 @@ input::placeholder,textarea::placeholder{color:var(--ink-3)}
 .tag-ok{background:var(--ok-soft);color:var(--ok)}
 .tag-brand{background:var(--brand-soft);color:var(--brand)}
 .code{font-family:var(--f-mono);font-size:.78rem;color:var(--ink-3)}
+/* Identyfikator opaski to 31 znaków, więc musi mieć prawo złamać się w dowolnym miejscu. */
+.tagid{font-family:var(--f-mono);overflow-wrap:anywhere}
+/* Kod QR zostaje czarny na białym także w ciemnym motywie: skaner czyta kontrast, nie motyw. */
+.qr{display:block;width:min(200px,52vw);height:auto;background:#fff;border:1px solid var(--line);border-radius:6px}
+.qrbox{display:flex;gap:1rem;flex-wrap:wrap;align-items:flex-start}
+.qrbox > div{flex:1 1 240px;min-width:0}
 
 /* ---------- landing ---------- */
 .hero{display:grid;grid-template-columns:1.15fr .85fr;gap:2.5rem;align-items:center}
@@ -223,6 +229,36 @@ footer .wrap{display:flex;gap:1.2rem;justify-content:space-between;align-items:c
 .spacer-link{display:inline-block;line-height:0;transition:opacity .2s ease}
 .spacer-link:hover{opacity:.7}
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+
+/* ---------- karta do portfela ---------- */
+.druk{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:1.1rem;max-width:680px;margin-inline:auto}
+.druk-head{display:flex;gap:1rem;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;border-bottom:2px solid var(--ink);padding-bottom:.6rem;margin-bottom:.7rem}
+.druk-head .qr{width:104px;flex:0 0 auto}
+.druk h2{font-size:1.35rem}
+.druk section{margin-bottom:.65rem;break-inside:avoid}
+.druk h4{font-family:var(--f-mono);font-size:.7rem;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3);margin-bottom:.15rem;font-weight:500}
+.druk ul{margin:0;padding-left:1.1rem;font-size:.9rem}
+.druk li{margin-bottom:.1rem}
+.druk .stopka{border-top:1px solid var(--line);padding-top:.5rem;font-size:.72rem;color:var(--ink-3);display:flex;justify-content:space-between;gap:.8rem;flex-wrap:wrap}
+.druk .waga{font-weight:700}
+
+/* Druk: czarno na białym, bez interfejsu. Podwojone `:root` bierze górę nad regułami
+   ciemnego motywu, które celują w `:root:not([data-theme="light"])`. */
+@media print{
+  :root:root{
+    --ground:#fff; --surface:#fff; --surface-2:#fff; --sunken:#fff;
+    --ink:#000; --ink-2:#1a1a1a; --ink-3:#3a3a3a; --line:#9a9a9a; --line-2:#6a6a6a;
+    --crit:#000; --crit-soft:#fff; --warn:#000; --warn-soft:#fff; --ok:#000; --ok-soft:#fff;
+    --brand:#000; --brand-soft:#fff; --on-crit:#000; --on-brand:#000; --shadow:none;
+  }
+  @page{margin:12mm}
+  body{background:#fff;font-size:10.5pt}
+  .topbar, footer, .bez-druku, .toast{display:none !important}
+  main{padding:0;min-height:0}
+  .wrap{width:100%}
+  .druk{border:0;padding:0;max-width:none}
+  .druk .tag{border:1px solid #000;background:#fff !important;color:#000 !important}
+}
 </style>
 
 <svg class="sr" aria-hidden="true"><defs>
@@ -309,13 +345,31 @@ function lsSave(all){ try { localStorage.setItem(LS, JSON.stringify(all)); } cat
 function lsDocs(){ try { return JSON.parse(localStorage.getItem(LSD) || "{}"); } catch(e){ return {}; } }
 function lsDocsSave(all){ try { localStorage.setItem(LSD, JSON.stringify(all)); } catch(e){} }
 
-/* Opaski, które ta przeglądarka otwierała PIN-em pacjenta. Podpowiedź do wyboru roli po zbliżeniu
-   opaski, nie uprawnienie: kartę i tak otwiera dopiero PIN. */
-function lsOwners(){ try { const v = JSON.parse(localStorage.getItem(LSO) || "[]"); return Array.isArray(v) ? v : []; } catch(e){ return []; } }
+/**
+ * Opaski, które ta przeglądarka otwierała PIN-em pacjenta. Dwie rzeczy naraz: podpowiedź do wyboru
+ * roli po zbliżeniu opaski i lista na ekranie pacjenta, żeby nie przepisywać 26 znaków z ręki.
+ * Podpowiedź nie jest uprawnieniem — kartę i tak otwiera dopiero PIN. Nazwisko leży tu dlatego,
+ * że lista ma być czytelna bez pytania serwera o cokolwiek.
+ */
+function lsOwners(){
+  try {
+    const v = JSON.parse(localStorage.getItem(LSO) || "[]");
+    if(!Array.isArray(v)) return [];
+    /* Pierwsza wersja trzymała same identyfikatory. */
+    return v.map(o => typeof o === "string" ? {tag:o, name:"", at:""} : o).filter(o => o && o.tag);
+  } catch(e){ return []; }
+}
 function ownersSave(list){ try { localStorage.setItem(LSO, JSON.stringify(list)); } catch(e){} }
-const isOwner = tagId => lsOwners().indexOf(tagId) >= 0;
-function markOwner(tagId){ if(!isOwner(tagId)) ownersSave(lsOwners().concat([tagId])); }
-function forgetOwner(tagId){ ownersSave(lsOwners().filter(t => t !== tagId)); }
+const isOwner = tagId => lsOwners().some(o => o.tag === tagId);
+function markOwner(tagId, name){
+  const wpis = {tag:tagId, name:String(name || "").trim(), at:nowISO()};
+  const inne = lsOwners().filter(o => o.tag !== tagId);
+  /* Nazwisko z poprzedniego otwarcia zostaje, gdy teraz go nie znamy. */
+  const stary = lsOwners().find(o => o.tag === tagId);
+  if(!wpis.name && stary) wpis.name = stary.name;
+  ownersSave(inne.concat([wpis]));
+}
+function forgetOwner(tagId){ ownersSave(lsOwners().filter(o => o.tag !== tagId)); }
 
 function blankCard(tagId){
   return { tagId, pinHash:"", demo:false,
@@ -337,14 +391,27 @@ function critical(card){
 
 const api = path => "api/" + path;
 const store = {
-  /* zestaw jawny — to samo, co widzi ratownik; bez PIN-u i bez historii */
+  /**
+   * Zestaw jawny — to samo, co widzi ratownik; bez PIN-u i bez historii. Unieważniona opaska oddaje
+   * `{revoked:true}`, nie kartę: ratownik ma zobaczyć, że opaska jest odcięta, a nie że nic nie ma.
+   */
   async get(tagId){
-    if(API){ const r = await fetch(api("cards/" + encodeURIComponent(tagId))); if(!r.ok) return null; return r.json(); }
-    return lsAll()[tagId] || null;
+    if(API){
+      const r = await fetch(api("cards/" + encodeURIComponent(tagId)));
+      if(r.status === 410){ const j = await r.json().catch(() => ({})); return {tagId, revoked:true, revokedAt:j.revokedAt || null}; }
+      if(!r.ok) return null;
+      return r.json();
+    }
+    const c = lsAll()[tagId];
+    if(!c) return null;
+    if(c.revokedAt) return {tagId, revoked:true, revokedAt:c.revokedAt};
+    return c;
   },
   async list(){
     if(API){ const r = await fetch(api("cards")); if(!r.ok) return []; return r.json(); }
-    return Object.values(lsAll()).map(c => ({tagId:c.tagId, name:c.person.name, demo:!!c.demo, updatedAt:c.updatedAt}));
+    /* Unieważnione opaski wypadają z listy tak samo jak na serwerze. */
+    return Object.values(lsAll()).filter(c => !c.revokedAt)
+      .map(c => ({tagId:c.tagId, name:(c.person || {}).name, demo:!!c.demo, updatedAt:c.updatedAt}));
   },
   /* pełna karta wraz z historią — wymaga PIN-u */
   async openWithDigest(tagId, dg){
@@ -375,6 +442,62 @@ const store = {
   async remove(tagId){
     if(API){ await fetch(api("cards/" + encodeURIComponent(tagId)), {method:"DELETE", headers:{"x-hero-pin": PIN_DG || ""}}); return; }
     const all = lsAll(); delete all[tagId]; lsSave(all);
+  },
+  /** Zmiana PIN-u karty. Treść karty i historia odczytów zostają na miejscu. */
+  async changePin(tagId, nowyDigest){
+    if(API){
+      const r = await fetch(api("cards/" + encodeURIComponent(tagId) + "/pin"), {method:"POST",
+        headers:{"content-type":"application/json", "x-hero-pin": PIN_DG || ""},
+        body: JSON.stringify({pinHash:nowyDigest})});
+      if(r.status === 204) return {ok:true};
+      const j = await r.json().catch(() => ({}));
+      return {ok:false, error: j.error || "Serwer odrzucił zmianę PIN-u (" + r.status + ")"};
+    }
+    const all = lsAll(), c = all[tagId];
+    if(!c) return {ok:false, error:"Nie ma karty o tym identyfikatorze"};
+    c.pinHash = nowyDigest;
+    lsSave(all);
+    return {ok:true};
+  },
+  /** Unieważnienie zgubionej opaski. Nieodwracalne: adres przestaje oddawać kartę raz na zawsze. */
+  async revoke(tagId){
+    if(API){
+      const r = await fetch(api("cards/" + encodeURIComponent(tagId) + "/revoke"), {method:"POST", headers:{"x-hero-pin": PIN_DG || ""}});
+      const j = await r.json().catch(() => ({}));
+      if(!r.ok) return {ok:false, error: j.error || "Serwer odrzucił unieważnienie (" + r.status + ")"};
+      return {ok:true, revokedAt: j.revokedAt};
+    }
+    const all = lsAll(), c = all[tagId];
+    if(!c) return {ok:false, error:"Nie ma karty o tym identyfikatorze"};
+    c.revokedAt = c.revokedAt || nowISO();
+    lsSave(all);
+    return {ok:true, revokedAt: c.revokedAt};
+  },
+  /**
+   * Przeniesienie karty na nową opaskę. Skrót PIN-u wiąże się z identyfikatorem opaski, więc nowy
+   * adres wymaga skrótu przeliczonego dla niego — dlatego przeniesienie pyta o PIN jeszcze raz.
+   */
+  async move(tagId, nowy, dgNowy){
+    if(API){
+      const r = await fetch(api("cards/" + encodeURIComponent(tagId) + "/move"), {method:"POST",
+        headers:{"content-type":"application/json", "x-hero-pin": PIN_DG || ""},
+        body: JSON.stringify({tagId:nowy, pinHash:dgNowy})});
+      const j = await r.json().catch(() => ({}));
+      if(!r.ok) return {ok:false, error: j.error || "Serwer odrzucił przeniesienie (" + r.status + ")"};
+      return {ok:true, card:j};
+    }
+    const all = lsAll(), c = all[tagId];
+    if(!c) return {ok:false, error:"Nie ma karty o tym identyfikatorze"};
+    if(all[nowy]) return {ok:false, error:"Karta o tym identyfikatorze już istnieje"};
+    const kopia = JSON.parse(JSON.stringify(c));
+    kopia.tagId = nowy; kopia.pinHash = dgNowy; kopia.reads = []; kopia.demo = false;
+    delete kopia.revokedAt;
+    all[nowy] = kopia;
+    /* Pod starym adresem zostaje nagrobek: historia odczytów tamtej opaski, bez treści karty. */
+    c.revokedAt = nowISO();
+    c.person = {}; c.allergies = []; c.meds = []; c.conditions = []; c.contacts = [];
+    lsSave(all);
+    return {ok:true, card:kopia};
   },
   async logRead(tagId, by, ctx){
     const payload = {by: by || "nieznany czytnik", ctx: ctx || "odczyt ratunkowy"};
@@ -438,7 +561,10 @@ const doctors = {
     if(!saved) { DOCTOR = null; return null; }
     if(API && saved.token){
       const r = await fetch(api("doctors/me"), {headers:{"x-hero-doctor": saved.token}}).catch(() => null);
+      /* Token wygasa po dobie: serwer odpowiada wtedy 403 i konto trzeba otworzyć na nowo. */
       if(!r || !r.ok){ ses.doctor(null); DOCTOR = null; return null; }
+      const j = await r.json().catch(() => ({}));
+      saved.sessions = j.sessions;
     }
     DOCTOR = saved;
     return DOCTOR;
@@ -448,12 +574,46 @@ const doctors = {
       try { await fetch(api("doctors/session"), {method:"DELETE", headers:{"x-hero-doctor": DOCTOR.token}}); } catch(e){}
     }
     DOCTOR = null; ses.doctor(null);
+  },
+  /** Wylogowanie ze wszystkich urządzeń — po zgubieniu telefonu jeden token to za mało. */
+  async logoutAll(){
+    if(API && DOCTOR && DOCTOR.token){
+      try { await fetch(api("doctors/sessions"), {method:"DELETE", headers:{"x-hero-doctor": DOCTOR.token}}); } catch(e){}
+    }
+    DOCTOR = null; ses.doctor(null);
   }
 };
 
 /* ---------------- opaska NFC ---------------- */
-/* NFC:START — czysta logika adresu opaski; test/nfc.test.js wycina ten blok i sprawdza osobno */
+/* NFC:START — czysta logika identyfikatora i adresu opaski; test/nfc.test.js wycina ten blok */
 const TAG_RE = /^[A-Z0-9][A-Z0-9-]{2,31}$/;
+
+/* Base32 Crockforda: bez I, L, O i U, więc identyfikatora przepisanego z opaski nie da się
+   pomylić z jedynką ani zerem. */
+const B32 = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+
+function randomBytes(n){
+  const out = new Uint8Array(n);
+  if(typeof crypto !== "undefined" && crypto.getRandomValues) crypto.getRandomValues(out);
+  else for(let i = 0; i < n; i++) out[i] = Math.floor(Math.random() * 256);
+  return out;
+}
+
+/**
+ * Identyfikator opaski: 128 bitów losowości w base32. Sam identyfikator otwiera odczyt ratunkowy,
+ * a opaskę nosi się na ręku — krótki i regularny identyfikator dałoby się zgadywać. Karty ze starymi
+ * identyfikatorami (`HERO-2481-KX`) działają dalej, bo `TAG_RE` ich nie odrzuca.
+ */
+function genTag(){
+  let bity = 0, akumulator = 0, out = "";
+  for(const b of randomBytes(16)){
+    akumulator = (akumulator << 8) | b;
+    bity += 8;
+    while(bity >= 5){ out += B32[(akumulator >>> (bity - 5)) & 31]; bity -= 5; }
+  }
+  if(bity) out += B32[(akumulator << (5 - bity)) & 31];
+  return "HERO-" + out;
+}
 
 /** Adres aplikacji bez nazwy pliku. Ten sam plik chodzi w trzech miejscach, więc bierzemy go z okna. */
 function appBase(loc){
@@ -475,6 +635,264 @@ function tagFromText(text){
   return TAG_RE.test(raw) ? raw : null;
 }
 /* NFC:END */
+
+/* QR:START — koder kodu QR, tryb bajtowy, korekcja M. Kod QR niesie ten sam adres co opaska, więc
+   działa tam, gdzie NFC nie: na telefonie bez czytnika, na iOS i na kartce w portfelu. Zamknięty
+   blok bez DOM-u, bo test/qr.test.js wycina go z tego pliku i porównuje siatki ze wzorcami. */
+
+/* wersja: [bajty korekcji na blok, [bloki, danych na blok], [bloki, danych na blok]] */
+const QR_EC = {
+  1:[10,[1,16]], 2:[16,[1,28]], 3:[26,[1,44]], 4:[18,[2,32]], 5:[24,[2,43]],
+  6:[16,[4,27]], 7:[18,[4,31]], 8:[22,[2,38],[2,39]], 9:[22,[3,36],[2,37]], 10:[26,[4,43],[1,44]],
+};
+const QR_ALIGN = {2:[6,18], 3:[6,22], 4:[6,26], 5:[6,30], 6:[6,34], 7:[6,22,38], 8:[6,24,42], 9:[6,26,46], 10:[6,28,50]};
+
+/* Ciało Galois GF(256) z wielomianem 0x11D — to samo, na którym stoi korekcja Reeda-Solomona w QR. */
+const GF_EXP = new Uint8Array(512), GF_LOG = new Uint8Array(256);
+(function(){
+  let x = 1;
+  for(let i = 0; i < 255; i++){ GF_EXP[i] = x; GF_LOG[x] = i; x = (x << 1) ^ (x & 0x80 ? 0x11D : 0); }
+  for(let i = 255; i < 512; i++) GF_EXP[i] = GF_EXP[i - 255];
+})();
+const gfMul = (a, b) => (a && b) ? GF_EXP[GF_LOG[a] + GF_LOG[b]] : 0;
+
+/** Wielomian generujący stopnia n: iloczyn (x + α^i). */
+function rsGen(n){
+  let g = [1];
+  for(let i = 0; i < n; i++){
+    const next = new Array(g.length + 1).fill(0);
+    for(let j = 0; j < g.length; j++){
+      next[j] ^= g[j];
+      next[j + 1] ^= gfMul(g[j], GF_EXP[i]);
+    }
+    g = next;
+  }
+  return g;
+}
+
+/** Reszta z dzielenia — bajty korekcji dla jednego bloku danych. */
+function rsRest(dane, n){
+  const gen = rsGen(n);
+  const buf = new Uint8Array(dane.length + n);
+  buf.set(dane);
+  for(let i = 0; i < dane.length; i++){
+    const f = buf[i];
+    if(!f) continue;
+    for(let j = 0; j < gen.length; j++) buf[i + j] ^= gfMul(gen[j], f);
+  }
+  return Array.from(buf.slice(dane.length));
+}
+
+const qrBit = (v, i) => (v >>> i) & 1;
+
+/** Najmniejsza wersja, w której treść się zmieści; null, gdy nie mieści się w żadnej obsługiwanej. */
+function qrVersion(bajtow){
+  for(let w = 1; w <= 10; w++){
+    const [, ...grupy] = QR_EC[w];
+    const dane = grupy.reduce((s, [ile, na]) => s + ile * na, 0);
+    const naglowek = 4 + (w >= 10 ? 16 : 8);
+    if(bajtow * 8 + naglowek <= dane * 8) return w;
+  }
+  return null;
+}
+
+/** Słowa kodowe: nagłówek, treść, wypełnienie, korekcja i przeplot bloków. */
+function qrCodewords(bajty, wersja){
+  const [ecPer, ...grupy] = QR_EC[wersja];
+  const bity = [];
+  const wstaw = (v, n) => { for(let i = n - 1; i >= 0; i--) bity.push(qrBit(v, i)); };
+  wstaw(0b0100, 4);                                   /* tryb bajtowy */
+  wstaw(bajty.length, wersja >= 10 ? 16 : 8);
+  for(const b of bajty) wstaw(b, 8);
+
+  const dane = grupy.reduce((s, [ile, na]) => s + ile * na, 0);
+  const miejsca = dane * 8;
+  for(let i = 0; i < 4 && bity.length < miejsca; i++) bity.push(0);   /* zamknięcie */
+  while(bity.length % 8) bity.push(0);
+  const slowa = [];
+  for(let i = 0; i < bity.length; i += 8) slowa.push(parseInt(bity.slice(i, i + 8).join(""), 2));
+  for(let i = 0; slowa.length < dane; i++) slowa.push(i % 2 ? 0x11 : 0xEC);   /* wypełniacze z normy */
+
+  const bloki = [], korekcje = [];
+  let poz = 0;
+  for(const [ile, na] of grupy){
+    for(let i = 0; i < ile; i++){
+      const blok = slowa.slice(poz, poz + na);
+      poz += na;
+      bloki.push(blok);
+      korekcje.push(rsRest(blok, ecPer));
+    }
+  }
+  const out = [];
+  const najdluzszy = Math.max(...bloki.map(b => b.length));
+  for(let i = 0; i < najdluzszy; i++) for(const b of bloki) if(i < b.length) out.push(b[i]);
+  for(let i = 0; i < ecPer; i++) for(const k of korekcje) out.push(k[i]);
+  return out;
+}
+
+/** Siatka modułów: true znaczy ciemny. Zwraca null, gdy treść nie mieści się w wersji 10. */
+function qrMatrix(tekst){
+  const bajty = Array.from(new TextEncoder().encode(String(tekst == null ? "" : tekst)));
+  const wersja = qrVersion(bajty.length);
+  if(!wersja) return null;
+  const n = 17 + 4 * wersja;
+  const mod = Array.from({length:n}, () => new Array(n).fill(false));
+  const fun = Array.from({length:n}, () => new Array(n).fill(false));
+  const set = (x, y, v) => { mod[y][x] = !!v; fun[y][x] = true; };
+
+  /* znaczniki pozycji z separatorami */
+  for(const [ox, oy] of [[0,0], [n-7,0], [0,n-7]]){
+    for(let dy = -1; dy <= 7; dy++) for(let dx = -1; dx <= 7; dx++){
+      const x = ox + dx, y = oy + dy;
+      if(x < 0 || y < 0 || x >= n || y >= n) continue;
+      const ramka = dx === 0 || dx === 6 || dy === 0 || dy === 6;
+      const srodek = dx >= 2 && dx <= 4 && dy >= 2 && dy <= 4;
+      set(x, y, (ramka && dx >= 0 && dx <= 6 && dy >= 0 && dy <= 6) || srodek);
+    }
+  }
+  /* linie taktujące */
+  for(let i = 8; i < n - 8; i++){ set(6, i, i % 2 === 0); set(i, 6, i % 2 === 0); }
+  /* znaczniki wyrównania */
+  const osie = QR_ALIGN[wersja] || [];
+  for(const cy of osie) for(const cx of osie){
+    if((cx === 6 && cy === 6) || (cx === 6 && cy === n - 7) || (cx === n - 7 && cy === 6)) continue;
+    for(let dy = -2; dy <= 2; dy++) for(let dx = -2; dx <= 2; dx++)
+      set(cx + dx, cy + dy, Math.max(Math.abs(dx), Math.abs(dy)) !== 1);
+  }
+  /* miejsce na informację o formacie i o wersji */
+  for(let i = 0; i < 9; i++){ if(!fun[8][i]) set(i, 8, false); if(!fun[i][8]) set(8, i, false); }
+  for(let i = 0; i < 8; i++){ if(!fun[8][n-1-i]) set(n-1-i, 8, false); if(!fun[n-1-i][8]) set(8, n-1-i, false); }
+  if(wersja >= 7) for(let i = 0; i < 18; i++){
+    const a = n - 11 + i % 3, b = Math.floor(i / 3);
+    if(!fun[b][a]) set(a, b, false);
+    if(!fun[a][b]) set(b, a, false);
+  }
+
+  /* dane wężykiem: pary kolumn od prawej, z pominięciem kolumny linii taktującej */
+  const slowa = qrCodewords(bajty, wersja);
+  let bit = 0;
+  for(let prawa = n - 1; prawa >= 1; prawa -= 2){
+    if(prawa === 6) prawa = 5;
+    for(let pion = 0; pion < n; pion++) for(let j = 0; j < 2; j++){
+      const x = prawa - j;
+      const wGore = ((prawa + 1) & 2) === 0;
+      const y = wGore ? n - 1 - pion : pion;
+      if(fun[y][x]) continue;
+      if(bit < slowa.length * 8) mod[y][x] = !!qrBit(slowa[bit >>> 3], 7 - (bit & 7));
+      bit++;
+    }
+  }
+
+  const maska = (m, x, y) => {
+    switch(m){
+      case 0: return (x + y) % 2 === 0;
+      case 1: return y % 2 === 0;
+      case 2: return x % 3 === 0;
+      case 3: return (x + y) % 3 === 0;
+      case 4: return (Math.floor(x / 3) + Math.floor(y / 2)) % 2 === 0;
+      case 5: return (x * y) % 2 + (x * y) % 3 === 0;
+      case 6: return ((x * y) % 2 + (x * y) % 3) % 2 === 0;
+      default: return ((x + y) % 2 + (x * y) % 3) % 2 === 0;
+    }
+  };
+  const format = m => {
+    let r = m;                                     /* korekcja M to 00, więc dane = sama maska */
+    for(let i = 0; i < 10; i++) r = (r << 1) ^ ((r >>> 9) * 0x537);
+    return ((m << 10) | (r & 0x3FF)) ^ 0x5412;
+  };
+
+  let najlepsza = 0, najlepszaKara = Infinity;
+  for(let m = 0; m < 8; m++){
+    nalozMaske(mod, fun, m, maska);
+    wpiszFormat(mod, format(m), n);
+    if(wersja >= 7) wpiszWersje(mod, wersja, n);
+    const kara = qrKara(mod, n);
+    if(kara < najlepszaKara){ najlepszaKara = kara; najlepsza = m; }
+    nalozMaske(mod, fun, m, maska);               /* maska jest swoją własną odwrotnością */
+  }
+  nalozMaske(mod, fun, najlepsza, maska);
+  wpiszFormat(mod, format(najlepsza), n);
+  if(wersja >= 7) wpiszWersje(mod, wersja, n);
+  return mod;
+}
+
+function nalozMaske(mod, fun, m, maska){
+  for(let y = 0; y < mod.length; y++) for(let x = 0; x < mod.length; x++)
+    if(!fun[y][x] && maska(m, x, y)) mod[y][x] = !mod[y][x];
+}
+/* Dwie kopie informacji o formacie: wzdłuż kolumny 8 i wiersza 8. Indeks pierwszy to wiersz. */
+function wpiszFormat(mod, bity, n){
+  for(let i = 0; i <= 5; i++) mod[i][8] = !!qrBit(bity, i);
+  mod[7][8] = !!qrBit(bity, 6);
+  mod[8][8] = !!qrBit(bity, 7);
+  mod[8][7] = !!qrBit(bity, 8);
+  for(let i = 9; i < 15; i++) mod[8][14 - i] = !!qrBit(bity, i);
+  for(let i = 0; i < 8; i++) mod[8][n - 1 - i] = !!qrBit(bity, i);
+  for(let i = 8; i < 15; i++) mod[n - 15 + i][8] = !!qrBit(bity, i);
+  mod[n - 8][8] = true;                            /* moduł zawsze ciemny */
+}
+function wpiszWersje(mod, wersja, n){
+  let r = wersja;
+  for(let i = 0; i < 12; i++) r = (r << 1) ^ ((r >>> 11) * 0x1F25);
+  const bity = (wersja << 12) | (r & 0xFFF);
+  for(let i = 0; i < 18; i++){
+    const v = !!qrBit(bity, i), a = n - 11 + i % 3, b = Math.floor(i / 3);
+    mod[b][a] = v;
+    mod[a][b] = v;
+  }
+}
+
+/** Kara z normy: cztery reguły, im mniej, tym czytelniej dla skanera. */
+function qrKara(mod, n){
+  let kara = 0;
+  const serie = linia => {
+    let ile = 1;
+    for(let i = 1; i <= linia.length; i++){
+      if(i < linia.length && linia[i] === linia[i - 1]){ ile++; continue; }
+      if(ile >= 5) kara += 3 + (ile - 5);
+      ile = 1;
+    }
+  };
+  for(let i = 0; i < n; i++){
+    serie(mod[i]);
+    serie(mod.map(r => r[i]));
+  }
+  for(let y = 0; y < n - 1; y++) for(let x = 0; x < n - 1; x++){
+    const a = mod[y][x];
+    if(a === mod[y][x+1] && a === mod[y+1][x] && a === mod[y+1][x+1]) kara += 3;
+  }
+  const wzor = [true,false,true,true,true,false,true];
+  const szukaj = linia => {
+    for(let i = 0; i + 7 <= linia.length; i++){
+      if(!wzor.every((v, k) => linia[i + k] === v)) continue;
+      const przed = linia.slice(Math.max(0, i - 4), i);
+      const po = linia.slice(i + 7, i + 11);
+      if((przed.length === 4 && przed.every(v => !v)) || (po.length === 4 && po.every(v => !v))) kara += 40;
+    }
+  };
+  for(let i = 0; i < n; i++){
+    szukaj(mod[i]);
+    szukaj(mod.map(r => r[i]));
+  }
+  let ciemne = 0;
+  for(const r of mod) for(const v of r) if(v) ciemne++;
+  kara += Math.floor(Math.abs(ciemne * 20 - n * n * 10) / (n * n)) * 10;
+  return kara;
+}
+
+/** Kod QR jako SVG w treści strony: bez żądań na zewnątrz i ostry przy druku. */
+function qrSvg(tekst, opis){
+  const mod = qrMatrix(tekst);
+  if(!mod) return "";
+  const n = mod.length, cisza = 4, bok = n + 2 * cisza;
+  let sciezka = "";
+  for(let y = 0; y < n; y++) for(let x = 0; x < n; x++)
+    if(mod[y][x]) sciezka += "M" + (x + cisza) + " " + (y + cisza) + "h1v1h-1z";
+  return '<svg class="qr" viewBox="0 0 ' + bok + ' ' + bok + '" role="img" aria-label="' + (opis || "Kod QR z adresem karty")
+    + '" shape-rendering="crispEdges"><rect width="' + bok + '" height="' + bok + '" fill="#fff"/>'
+    + '<path d="' + sciezka + '" fill="#000"/></svg>';
+}
+/* QR:END */
 
 /**
  * Web NFC. Działa w Chrome na Androidzie, wyłącznie w bezpiecznym kontekście i po geście
@@ -675,7 +1093,7 @@ async function renderStart(){
   +   '<div class="panel" style="margin-top:.8rem"><div class="panel-b">'
   +   (cards.length
       ? '<div class="scrollx"><table><thead><tr><th>Identyfikator</th><th>Pacjent</th><th>Ostatnia zmiana</th><th></th></tr></thead><tbody>'
-        + cards.map(c => '<tr><td class="mono">'+esc(c.tagId)+(c.demo?' <span class="tag">przykład</span>':"")+'</td><td>'+esc(c.name||"—")+'</td><td>'+esc(fmtDT(c.updatedAt))+'</td><td style="text-align:right"><a class="btn btn-sm" href="#/t/'+encodeURIComponent(c.tagId)+'">Jak po zbliżeniu</a> <a class="btn btn-sm" href="#/odczyt?tag='+encodeURIComponent(c.tagId)+'">Odczytaj</a></td></tr>').join("")
+        + cards.map(c => '<tr><td class="tagid">'+esc(c.tagId)+(c.demo?' <span class="tag">przykład</span>':"")+'</td><td>'+esc(c.name||"—")+'</td><td>'+esc(fmtDT(c.updatedAt))+'</td><td style="text-align:right"><a class="btn btn-sm" href="#/t/'+encodeURIComponent(c.tagId)+'">Jak po zbliżeniu</a> <a class="btn btn-sm" href="#/odczyt?tag='+encodeURIComponent(c.tagId)+'">Odczytaj</a></td></tr>').join("")
         + '</tbody></table></div>'
       : '<div class="empty">Nie ma jeszcze żadnej karty. Zacznij od „Załóż kartę”.</div>')
   +   '</div></div>'
@@ -715,7 +1133,7 @@ function readoutHTML(card, entry){
   + '<div class="ro-sec"><h4>Kontakty alarmowe</h4><div class="contacts">'
   +   ((card.contacts||[]).length ? (card.contacts||[]).map(k => '<div class="contact"><div class="small" style="font-weight:600">'+esc(k.name)+(k.primary?' <span class="tag tag-ok">pierwszy</span>':"")+'</div><div class="tiny muted">'+esc(k.relation||"")+'</div><a href="tel:'+esc((k.phone||"").replace(/\s/g,""))+'">'+esc(k.phone)+'</a></div>').join("") : '<p class="small muted">Brak kontaktów alarmowych.</p>')
   + '</div></div>'
-  + '<div class="ro-foot"><span>Karta <span class="mono">'+esc(card.tagId)+'</span> · aktualizacja '+esc(fmtDT(card.updatedAt))+' ('+esc(card.updatedBy||"pacjent")+')</span>'
+  + '<div class="ro-foot"><span>Karta <span class="tagid">'+esc(card.tagId)+'</span> · aktualizacja '+esc(fmtDT(card.updatedAt))+' ('+esc(card.updatedBy||"pacjent")+')</span>'
   +   '<span>Odczyt zapisany: '+esc(fmtDT(entry.at))+' · '+esc(entry.by)+'</span></div>'
   + '</div>';
 }
@@ -744,6 +1162,15 @@ function handoverText(card){
   return L.join("\n");
 }
 
+/** Ratownik ze starą opaską w ręku musi wiedzieć, że trafił na odciętą, a nie na zepsuty serwis. */
+function revokedHTML(tagId, revokedAt){
+  return '<div class="notice crit"><span><b>Opaska unieważniona</b>'
+  + (revokedAt ? ' ' + esc(fmtDT(revokedAt)) : "")
+  + '. Pacjent zgłosił utratę tej opaski, więc pod jej adresem nie ma karty. Jeśli pacjent jest przytomny, '
+  + 'poproś o nową opaskę; jeśli nie — szukaj drugiej opaski albo dokumentów. Identyfikator: '
+  + '<span class="tagid">' + esc(tagId) + '</span></span></div>';
+}
+
 function wireHandover(card){
   const b = document.getElementById("copyHand");
   if(!b) return;
@@ -759,7 +1186,7 @@ async function renderScan(params){
   + '<div><p class="eyebrow">Rola: ratownik</p><h1 style="font-size:2rem">Odczyt ratunkowy</h1>'
   + '<p class="muted" style="margin-top:.5rem">W realnym urządzeniu ten ekran otwiera się po zbliżeniu telefonu do opaski. Tutaj wpisz identyfikator karty ręcznie.</p></div>'
   + '<div class="panel"><div class="panel-b"><form id="scanForm" class="row">'
-  +   '<label class="f" style="flex:2 1 220px">Identyfikator opaski<input class="mono" name="tag" placeholder="HERO-0000-XX" value="'+esc(pre)+'" required></label>'
+  +   '<label class="f" style="flex:2 1 220px">Identyfikator opaski<input class="mono" name="tag" placeholder="identyfikator z opaski" value="'+esc(pre)+'" required></label>'
   +   '<label class="f" style="flex:1 1 160px">Kto odczytuje<input name="by" placeholder="ZRM P-12 / SOR"></label>'
   +   '<button class="btn btn-crit" type="submit">Odczytaj kartę</button>'
   +   (nfcReady() ? '<button class="btn" type="button" id="scanNfc">Odczytaj z opaski</button>' : "")
@@ -783,7 +1210,8 @@ async function renderScan(params){
     const tag = form.tag.value.trim().toUpperCase();
     const by = form.by.value.trim() || "czytnik nieopisany";
     const card = await store.get(tag);
-    if(!card){ out.innerHTML = '<div class="notice crit"><span>Nie znaleziono karty <b class="mono">'+esc(tag)+'</b>. Sprawdź identyfikator albo załóż kartę w zakładce „Moja karta”.</span></div>'; return; }
+    if(!card){ out.innerHTML = '<div class="notice crit"><span>Nie znaleziono karty <b class="tagid">'+esc(tag)+'</b>. Sprawdź identyfikator albo załóż kartę w zakładce „Moja karta”.</span></div>'; return; }
+    if(card.revoked){ out.innerHTML = revokedHTML(tag, card.revokedAt); return; }
     const entry = await store.logRead(tag, by, "odczyt ratunkowy");
     out.innerHTML = readoutHTML(critical(card), entry)
       + '<div class="row" style="margin-top:.8rem"><button class="btn btn-sm" id="copyHand">Skopiuj podsumowanie do przekazania</button></div>';
@@ -798,7 +1226,6 @@ let CARD = null, ROLE = "pacjent", TAB = "podstawowe", EDIT = {};
 const TABS = [["podstawowe","Dane podstawowe"],["alergie","Alergie"],["leki","Leki"],["choroby","Choroby"],["kontakty","Kontakty"],["opaska","Opaska NFC"],["historia","Historia odczytów"]];
 const ROUTES = ["doustnie","podskórnie","dożylnie","domięśniowo","wziewnie","przezskórnie","inne"];
 function opt(list, cur){ return list.map(v => '<option value="'+esc(v)+'"'+(String(cur)===String(v)?" selected":"")+'>'+esc(v)+'</option>').join(""); }
-function genTag(){ const d = String(Math.floor(1000+Math.random()*9000)); const A = "ABCDEFGHJKLMNPRSTUWXZ"; return "HERO-"+d+"-"+A[Math.floor(Math.random()*A.length)]+A[Math.floor(Math.random()*A.length)]; }
 
 function renderEditor(){
   nfcStop();
@@ -807,7 +1234,8 @@ function renderEditor(){
   view.innerHTML = '<div class="stack">'
   + '<div class="panel"><div class="panel-h">'
   +   '<div><p class="eyebrow">'+(isDoc ? "Rola: lekarz — " + esc(DOCTOR ? DOCTOR.name + ", PWZ " + DOCTOR.pwz : "konto nieznane") : "Rola: pacjent")+'</p>'
-  +   '<h3>'+esc(p.name || "Karta bez nazwiska")+' <span class="mono tiny muted">'+esc(CARD.tagId)+'</span></h3>'
+  +   '<h3>'+esc(p.name || "Karta bez nazwiska")+' <span class="tagid tiny muted">'+esc(CARD.tagId)+'</span>'
+  +   (CARD.revokedAt ? ' <span class="tag tag-crit">opaska unieważniona</span>' : "")+'</h3>'
   +   '<p class="tiny muted">Ostatnia zmiana: '+esc(fmtDT(CARD.updatedAt))+' · '+esc(CARD.updatedBy||"pacjent")+'</p></div>'
   +   '<div class="row" style="margin-left:auto">'
   +     '<a class="btn btn-sm" href="#/odczyt?tag='+encodeURIComponent(CARD.tagId)+'">Podgląd odczytu</a>'
@@ -833,6 +1261,8 @@ async function persist(){
   CARD.updatedBy = ROLE;
   const zapisana = await store.save(CARD);
   if(zapisana && zapisana.tagId) CARD = zapisana;
+  /* Lista opasek na ekranie pacjenta ma nadążać za nazwiskiem w karcie. */
+  if(ROLE === "pacjent") markOwner(CARD.tagId, CARD.person && CARD.person.name);
 }
 
 async function renderTab(){
@@ -857,7 +1287,19 @@ async function renderTab(){
     + '<label class="f">Uwagi dla zespołu ratunkowego<textarea name="note" placeholder="np. trudny dostęp dożylny, niepełnosprawność, opieka nad dzieckiem">'+esc(p.note)+'</textarea></label>'
     + '<div class="row"><label class="check"><input type="checkbox" name="donor"'+(p.donor?" checked":"")+'> Zgoda na pobranie narządów</label>'
     +   '<label class="check"><input type="checkbox" name="dnr"'+(p.dnr?" checked":"")+'> Zgłoszone oświadczenie DNR</label></div>'
-    + '<div class="row"><button class="btn btn-primary" type="submit">Zapisz dane podstawowe</button></div></form>';
+    + '<div class="row"><button class="btn btn-primary" type="submit">Zapisz dane podstawowe</button></div></form>'
+    /* PIN chroni edycję karty, więc zmienia go pacjent, nie lekarz z dostępem do tej samej karty. */
+    + (ROLE === "pacjent"
+      ? '<details style="margin-top:1.2rem"><summary class="small muted" style="cursor:pointer">Zmiana PIN-u</summary>'
+        + '<p class="small muted" style="margin:.6rem 0">PIN otwiera kartę do edycji — jeśli ktoś go poznał, zmień go tutaj. Karta, historia odczytów i opaska zostają bez zmian, bo PIN-u nie ma w opasce.</p>'
+        + '<form id="fPin" class="stack" style="max-width:340px">'
+        +   '<label class="f">Obecny PIN<input type="password" name="stary" inputmode="numeric" required></label>'
+        +   '<label class="f">Nowy PIN<input type="password" name="nowy" inputmode="numeric" minlength="4" maxlength="6" required placeholder="4–6 cyfr"></label>'
+        +   '<label class="f">Powtórz nowy PIN<input type="password" name="nowy2" inputmode="numeric" required></label>'
+        +   '<button class="btn btn-primary btn-sm" type="submit">Zmień PIN</button>'
+        +   '<p id="pinErr" class="tiny" style="color:var(--crit)"></p>'
+        + '</form></details>'
+      : "");
     document.getElementById("fBasic").addEventListener("submit", async e => {
       e.preventDefault(); const f = e.target;
       CARD.person = { name:f.name.value.trim(), birthDate:f.birthDate.value, blood:f.blood.value, rh:f.rh.value,
@@ -865,19 +1307,48 @@ async function renderTab(){
         devices:f.devices.value.trim(), note:f.note.value.trim(), donor:f.donor.checked, dnr:f.dnr.checked };
       await persist(); toast("Zapisano"); renderEditor();
     });
+
+    const formPin = document.getElementById("fPin");
+    if(formPin) formPin.addEventListener("submit", async ev => {
+      ev.preventDefault();
+      const f = ev.target;
+      if(f.nowy.value !== f.nowy2.value){ formErr("pinErr", "Nowe PIN-y się różnią."); return; }
+      const stary = await digest(CARD.tagId, f.stary.value);
+      if(PIN_DG && stary !== PIN_DG){ formErr("pinErr", "Obecny PIN się nie zgadza."); return; }
+      const nowy = await digest(CARD.tagId, f.nowy.value);
+      if(nowy === stary){ formErr("pinErr", "Nowy PIN jest taki sam jak stary."); return; }
+      const r = await store.changePin(CARD.tagId, nowy);
+      if(!r.ok){ formErr("pinErr", r.error); return; }
+      PIN_DG = nowy;
+      ses.set({tagId:CARD.tagId, role:ROLE, dg:PIN_DG});
+      toast("PIN zmieniony");
+      renderEditor();
+    });
     return;
   }
 
   if(TAB === "opaska"){
     const base = appBase(location);
     const url = tagUrl(CARD.tagId, base);
+    const martwa = !!CARD.revokedAt;
+    const mozeZapisac = nfcReady() && !martwa;
     b.innerHTML = '<div class="stack">'
+    + (martwa
+        ? '<div class="notice crit"><span>Ta opaska jest unieważniona od '+esc(fmtDT(CARD.revokedAt))+'. Pod jej adresem nikt nie dostanie karty — ani ratownik, ani ty. Karta ma się znów odczytywać? Przenieś ją na nową opaskę.</span></div>'
+        : "")
     + '<p class="small muted">W opasce zostaje sam adres tej karty, bez danych medycznych. Kto zbliży do niej telefon, otworzy ten adres: pacjent i lekarz trafią na pytanie o PIN, każdy inny na odczyt ratunkowy.</p>'
-    + '<label class="f">Adres zapisywany w opasce<input class="mono" id="nfcUrl" readonly value="'+esc(url)+'"></label>'
+    + '<div class="qrbox">'
+    +   (base ? qrSvg(url, "Kod QR z adresem karty " + CARD.tagId) : "")
+    +   '<div>'
+    +     '<label class="f">Adres zapisywany w opasce<input class="mono" id="nfcUrl" readonly value="'+esc(url)+'"></label>'
+    +     '<p class="tiny muted" style="margin-top:.5rem">Kod QR niesie ten sam adres. Działa tam, gdzie NFC nie: na telefonie bez czytnika, na iOS i po wydrukowaniu. Aparat telefonu wystarczy — kod prowadzi na ten sam ekran co zbliżenie opaski.</p>'
+    +   '</div>'
+    + '</div>'
     + '<div class="row">'
-    +   '<button class="btn btn-primary" id="nfcWrite"'+(nfcReady()?"":" disabled")+'>Zapisz kartę na opasce</button>'
+    +   '<button class="btn btn-primary" id="nfcWrite"'+(mozeZapisac?"":" disabled")+'>Zapisz kartę na opasce</button>'
     +   '<button class="btn" id="nfcCheck"'+(nfcReady()?"":" disabled")+'>Sprawdź, co jest na opasce</button>'
     +   '<button class="btn btn-sm" id="nfcCopy">Skopiuj adres</button>'
+    +   '<button class="btn btn-sm" id="doWydruku">Wydrukuj kartę do portfela</button>'
     + '</div>'
     + '<div id="nfcOut"></div>'
     + (nfcReady() ? '' : '<div class="notice warn"><span>Ta przeglądarka nie udostępnia Web NFC — zapis działa dziś w Chrome na Androidzie, na stronie otwartej przez HTTPS. Na innym sprzęcie zapisz powyższy adres w opasce dowolną aplikacją do NFC, jako rekord typu URL.</span></div>')
@@ -887,6 +1358,20 @@ async function renderTab(){
     +   '<p class="small muted" style="margin:.6rem 0">Opaskę można zablokować przed nadpisaniem. Operacji nie da się cofnąć: zablokowanej opaski nie przypiszesz już do innej karty.</p>'
     +   '<button class="btn btn-sm" id="nfcLock"'+(nfcReady()?"":" disabled")+'>Zabezpiecz opaskę przed zapisem</button>'
     + '</details>'
+    /* Unieważnienie i przeniesienie zmieniają los całej karty, więc zostają przy pacjencie — tak samo
+       jak usunięcie karty, którego lekarz też nie ma. */
+    + (ROLE === "pacjent"
+      ? '<details'+(martwa?" open":"")+'><summary class="small muted" style="cursor:pointer">Zgubiona opaska</summary>'
+        + '<p class="small muted" style="margin:.6rem 0">Sam identyfikator z opaski otwiera odczyt ratunkowy, więc zgubiona opaska zostaje kluczem do zestawu krytycznego. Unieważnienie odcina ten adres na zawsze: karta zostaje, ale pod starym identyfikatorem nikt jej nie odczyta. Przeniesienie robi to samo i od razu daje karcie nową opaskę — historia odczytów zostaje przy starej.</p>'
+        + (martwa ? "" : '<div class="row" style="margin-bottom:1rem"><button class="btn btn-crit btn-sm" id="revoke">Unieważnij tę opaskę</button></div>')
+        + '<form id="fMove" class="stack" style="max-width:340px">'
+        +   '<label class="f">PIN karty<input type="password" name="pin" inputmode="numeric" required placeholder="ten sam PIN"></label>'
+        +   '<button class="btn btn-primary btn-sm" type="submit">Przenieś kartę na nową opaskę</button>'
+        +   '<p class="tiny muted">Nowy identyfikator wymaga skrótu PIN-u przeliczonego dla niego, dlatego pytamy o PIN jeszcze raz. Sam PIN się nie zmienia.</p>'
+        +   '<p id="moveErr" class="tiny" style="color:var(--crit)"></p>'
+        + '</form>'
+        + '</details>'
+      : "")
     + '</div>';
 
     const out = document.getElementById("nfcOut");
@@ -895,7 +1380,7 @@ async function renderTab(){
       try { await navigator.clipboard.writeText(url); toast("Adres skopiowany"); }
       catch(e){ document.getElementById("nfcUrl").select(); toast("Skopiuj zaznaczony adres"); }
     });
-    if(nfcReady()){
+    if(mozeZapisac){
       document.getElementById("nfcWrite").addEventListener("click", async () => {
         info("", "Przyłóż opaskę do telefonu i przytrzymaj chwilę…");
         const r = await nfcWrite(url);
@@ -903,6 +1388,8 @@ async function renderTab(){
         info("ok", "Opaska zapisana. Od teraz zbliżenie telefonu otwiera kartę " + CARD.tagId + ".");
         toast("Opaska zapisana");
       });
+    }
+    if(nfcReady()){
       document.getElementById("nfcCheck").addEventListener("click", async () => {
         info("", "Przyłóż opaskę do telefonu…");
         const r = await nfcScan(znaleziony => {
@@ -920,11 +1407,52 @@ async function renderTab(){
         info(r.ok ? "ok" : "crit", r.ok ? "Opaska zabezpieczona — zapisanego adresu nie da się już zmienić." : r.error);
       });
     }
+
+    document.getElementById("doWydruku").addEventListener("click", () => {
+      renderPrint(CARD, () => renderEditor());
+    });
+
+    const przyciskRevoke = document.getElementById("revoke");
+    if(przyciskRevoke) przyciskRevoke.addEventListener("click", async () => {
+      if(!confirm("Unieważnić opaskę " + CARD.tagId + "? Pod tym adresem nikt już nie odczyta karty, a operacji nie da się cofnąć.")) return;
+      const r = await store.revoke(CARD.tagId);
+      if(!r.ok){ info("crit", r.error); return; }
+      CARD.revokedAt = r.revokedAt;
+      toast("Opaska unieważniona");
+      renderEditor();
+    });
+
+    const formMove = document.getElementById("fMove");
+    if(formMove) formMove.addEventListener("submit", async ev => {
+      ev.preventDefault();
+      const pin = ev.target.pin.value;
+      const stary = CARD.tagId;
+      /* Skrót liczymy z PIN-u na miejscu: bez serwera nikt tego nie sprawdzi, a karty nie wolno
+         zostawić w połowie drogi. */
+      if(PIN_DG && await digest(stary, pin) !== PIN_DG){ formErr("moveErr", "Nieprawidłowy PIN."); return; }
+      const nowy = genTag();
+      const dgNowy = await digest(nowy, pin);
+      const r = await store.move(stary, nowy, dgNowy);
+      if(!r.ok){ formErr("moveErr", r.error); return; }
+      PIN_DG = dgNowy;
+      CARD = r.card;
+      ses.set({tagId:nowy, role:ROLE, dg:PIN_DG});
+      forgetOwner(stary);
+      markOwner(nowy, CARD.person && CARD.person.name);
+      toast("Karta przeniesiona na nową opaskę");
+      renderEditor();
+    });
     return;
   }
 
   if(TAB === "historia"){
-    if(PIN_DG){ const fresh = await store.openWithDigest(CARD.tagId, PIN_DG); if(fresh.ok) CARD.reads = fresh.card.reads || []; }
+    if(PIN_DG){
+      const tagId = CARD.tagId;
+      const fresh = await store.openWithDigest(tagId, PIN_DG);
+      /* Kartę można zamknąć w trakcie tego zapytania — wtedy nie ma już czego rysować. */
+      if(!CARD || CARD.tagId !== tagId || !document.getElementById("tabBody")) return;
+      if(fresh.ok) CARD.reads = fresh.card.reads || [];
+    }
     const reads = CARD.reads || [];
     b.innerHTML = '<div class="row" style="justify-content:space-between;margin-bottom:.8rem"><p class="small muted" style="flex:1 1 260px">Każde otwarcie karty w trybie ratunkowym zostawia ślad. Historia jest widoczna dla pacjenta i lekarza z dostępem.</p>'
     + '<button class="btn btn-sm" id="reloadReads">Odśwież</button></div>'
@@ -989,7 +1517,12 @@ async function renderTab(){
     const btn = ev.target.closest("[data-act]"); if(!btn) return;
     const id = btn.closest("[data-id]").dataset.id;
     if(btn.dataset.act === "del"){
-      CARD[cfg.key] = list.filter(x => x.id !== id); await persist(); toast("Wpis usunięty"); renderTab();
+      const zakladka = TAB;
+      CARD[cfg.key] = list.filter(x => x.id !== id);
+      await persist();
+      toast("Wpis usunięty");
+      /* Zapis bywa wolniejszy niż klikanie: przerysowujemy tylko tę zakładkę, w której się zaczął. */
+      if(TAB === zakladka) renderTab();
     } else { EDIT[cfg.key] = id; renderTab(); document.getElementById("fEntry").scrollIntoView({behavior:"smooth", block:"nearest"}); }
   });
   const ce = document.getElementById("cancelEdit");
@@ -1011,7 +1544,12 @@ async function renderTab(){
     }
     if(cfg.key === "contacts" && data.primary) CARD.contacts.forEach(k => { if(k.id !== current.id) k.primary = false; });
     EDIT[cfg.key] = null;
-    await persist(); toast(editing ? "Zmiana zapisana" : "Wpis dodany"); renderTab();
+    const zakladka = TAB;
+    await persist();
+    toast(editing ? "Zmiana zapisana" : "Wpis dodany");
+    /* Bez tego zapis kończący się po przełączeniu zakładki wyczyściłby formularz, w którym ktoś
+       już pisze. */
+    if(TAB === zakladka) renderTab();
   });
 }
 
@@ -1023,12 +1561,27 @@ async function renderCardView(){
     if(r.ok){ CARD = r.card; ROLE = "pacjent"; renderEditor(); return; }
     ses.clear();
   }
+  const znane = lsOwners().slice().reverse();
   view.innerHTML = '<div class="stack" style="max-width:900px;margin-inline:auto">'
   + '<div><p class="eyebrow">Rola: pacjent</p><h1 style="font-size:2rem">Moja karta</h1>'
   + '<p class="muted" style="margin-top:.5rem">Identyfikator opaski i PIN otwierają kartę do edycji. Ratownikowi wystarczy sam identyfikator — PIN chroni edycję, nie odczyt ratunkowy.</p></div>'
+  /* Identyfikator ma 128 bitów losowości, więc nikt go z pamięci nie wpisze: karty otwierane
+     na tym urządzeniu trzymamy na liście, a pełny identyfikator i tak zostaje w opasce. */
+  + (znane.length
+      ? '<div class="panel"><div class="panel-h"><h3>Opaski znane tej przeglądarce</h3>'
+        + '<span class="tiny muted" style="margin-left:auto">otwierane tu PIN-em pacjenta</span></div>'
+        + '<div class="panel-b" id="znane">'
+        + znane.map(o => '<div class="rec" data-tag="'+esc(o.tag)+'"><div class="main">'
+            + '<div class="name">'+esc(o.name || "karta bez nazwiska")+'</div>'
+            + '<div class="meta tagid">'+esc(o.tag)+'</div></div>'
+            + '<div class="acts"><button class="btn btn-sm" data-act="open">Otwórz</button>'
+            + '<button class="btn btn-ghost btn-sm" data-act="forget">Zapomnij</button></div></div>').join("")
+        + '<p class="tiny muted" style="margin-top:.7rem">Lista leży w pamięci tej przeglądarki i nie dowodzi niczego — kartę otwiera PIN.</p>'
+        + '</div></div>'
+      : "")
   + '<div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(280px,1fr));align-items:start">'
   + '<div class="panel"><div class="panel-h"><h3>Otwórz istniejącą kartę</h3></div><div class="panel-b"><form id="fOpen" class="stack">'
-  +   '<label class="f">Identyfikator opaski<input class="mono" name="tag" required placeholder="HERO-0000-XX"></label>'
+  +   '<label class="f">Identyfikator opaski<input class="mono" name="tag" required placeholder="identyfikator z opaski"></label>'
   +   '<label class="f">PIN<input type="password" name="pin" inputmode="numeric" required placeholder="4–6 cyfr"></label>'
   +   '<button class="btn btn-primary" type="submit">Otwórz kartę</button><p id="openErr" class="tiny" style="color:var(--crit)"></p></form></div></div>'
   + '<div class="panel"><div class="panel-h"><h3>Załóż nową kartę</h3></div><div class="panel-b"><form id="fNew" class="stack">'
@@ -1043,12 +1596,24 @@ async function renderCardView(){
     + ' Kartę można usunąć jednym przyciskiem.</span></div>'
   + '</div>';
 
+  const panelZnane = document.getElementById("znane");
+  if(panelZnane) panelZnane.addEventListener("click", e => {
+    const btn = e.target.closest("[data-act]");
+    if(!btn) return;
+    const tag = btn.closest("[data-tag]").dataset.tag;
+    if(btn.dataset.act === "forget"){ forgetOwner(tag); renderCardView(); return; }
+    const f = document.getElementById("fOpen");
+    f.tag.value = tag; f.pin.value = "";
+    f.pin.focus();
+    f.scrollIntoView({behavior:"smooth", block:"nearest"});
+  });
+
   document.getElementById("fOpen").addEventListener("submit", async e => {
     e.preventDefault(); const f = e.target;
     const tag = f.tag.value.trim().toUpperCase();
     const r = await store.verify(tag, f.pin.value);
     if(!r.ok){ formErr("openErr", r.reason === "pin" ? "Nieprawidłowy PIN." : "Nie ma karty o tym identyfikatorze."); return; }
-    markOwner(tag);
+    markOwner(tag, r.card.person && r.card.person.name);
     CARD = r.card; ROLE = "pacjent"; TAB = "podstawowe"; ses.set({tagId:tag, role:"pacjent", dg:PIN_DG}); renderEditor();
   });
   document.getElementById("fNew").addEventListener("submit", async e => {
@@ -1063,21 +1628,34 @@ async function renderCardView(){
     TAB = "opaska";
     const zapisana = await store.save(c);
     if(zapisana && zapisana.tagId) CARD = zapisana;
-    markOwner(tag); ses.set({tagId:tag, role:"pacjent", dg:PIN_DG});
+    markOwner(tag, c.person.name); ses.set({tagId:tag, role:"pacjent", dg:PIN_DG});
     renderEditor(); toast("Karta " + tag + " utworzona");
   });
 }
 
 function docBar(){
+  const ile = Number(DOCTOR.sessions || 0);
   return '<div class="panel"><div class="panel-h">'
   + '<div><p class="eyebrow">Zalogowane konto lekarza</p>'
-  + '<h3>' + esc(DOCTOR.name) + ' <span class="mono tiny muted">PWZ ' + esc(DOCTOR.pwz) + '</span></h3></div>'
-  + '<button class="btn btn-sm" id="docOut" style="margin-left:auto">Wyloguj z konta</button>'
-  + '</div></div>';
+  + '<h3>' + esc(DOCTOR.name) + ' <span class="mono tiny muted">PWZ ' + esc(DOCTOR.pwz) + '</span></h3>'
+  + (ile > 1 ? '<p class="tiny muted">Zalogowanych urządzeń: ' + ile + '</p>' : "")
+  + '</div>'
+  + '<div class="row" style="margin-left:auto">'
+  +   '<button class="btn btn-sm" id="docOut">Wyloguj z konta</button>'
+  +   (API ? '<button class="btn btn-sm" id="docOutAll">Wyloguj wszędzie</button>' : "")
+  + '</div></div></div>';
 }
 function wireDocBar(){
   const b = document.getElementById("docOut");
   if(b) b.addEventListener("click", async () => { await doctors.logout(); ses.clear(); CARD = null; renderDoctorView(); });
+  const w = document.getElementById("docOutAll");
+  if(w) w.addEventListener("click", async () => {
+    if(!confirm("Wylogować konto ze wszystkich urządzeń? Token sesji przestanie działać także tam, gdzie zostawiłeś go otwarty.")) return;
+    await doctors.logoutAll();
+    ses.clear(); CARD = null;
+    toast("Konto wylogowane ze wszystkich urządzeń");
+    renderDoctorView();
+  });
 }
 
 /** Ekran logowania i zakładania konta lekarza. `dalej` wraca tam, skąd przyszło żądanie konta. */
@@ -1135,7 +1713,7 @@ async function renderDoctorView(){
   + '<p class="muted" style="margin-top:.5rem">Pacjent podaje identyfikator opaski i swój PIN. Wpisy, które dodasz, zostaną podpisane twoim kontem.</p></div>'
   + docBar()
   + '<div class="panel"><div class="panel-b"><form id="fDoc" class="stack">'
-  +   '<label class="f">Identyfikator opaski<input class="mono" name="tag" required placeholder="HERO-0000-XX"></label>'
+  +   '<label class="f">Identyfikator opaski<input class="mono" name="tag" required placeholder="identyfikator z opaski"></label>'
   +   '<label class="f">Kod dostępu (PIN pacjenta)<input type="password" name="pin" inputmode="numeric" required></label>'
   +   '<button class="btn btn-primary" type="submit">Otwórz kartę pacjenta</button><p id="docErr" class="tiny" style="color:var(--crit)"></p>'
   + '</form></div></div>'
@@ -1154,12 +1732,76 @@ async function renderDoctorView(){
   });
 }
 
+/* ---------------- karta do portfela ---------------- */
+/**
+ * Wydruk karty ratunkowej. Zapas na sytuację, w której telefon pacjenta jest rozładowany, a opaski
+ * nie ma jak odczytać: ten sam zestaw krytyczny co na ekranie ratownika, czarno na białym, z kodem
+ * QR prowadzącym pod adres karty. Kolejność sekcji jest ta sama co w odczycie ratunkowym.
+ */
+function printHTML(card){
+  const c = critical(card);
+  const p = c.person || {};
+  const a = age(p.birthDate);
+  const url = tagUrl(card.tagId, appBase(location));
+  const lista = (poz, pusto) => poz.length
+    ? '<ul>' + poz.map(x => '<li>' + x + '</li>').join("") + '</ul>'
+    : '<p class="small muted">' + esc(pusto) + '</p>';
+  const sekcja = (tytul, tresc) => '<section><h4>' + esc(tytul) + '</h4>' + tresc + '</section>';
+
+  const alergie = (c.allergies || []).slice().sort((x, y) => y.severity - x.severity)
+    .map(x => '<span class="' + (Number(x.severity) >= 3 ? "waga" : "") + '">' + esc(x.allergen) + '</span> — '
+      + esc(SEV[Number(x.severity) || 1]) + (x.reaction ? ', ' + esc(x.reaction) : ""));
+  const leki = (c.meds || []).slice().sort((x, y) => (y.anticoag ? 1 : 0) - (x.anticoag ? 1 : 0))
+    .map(m => '<span class="' + (m.anticoag ? "waga" : "") + '">' + esc(m.name) + '</span> '
+      + esc([m.dose, m.freq].filter(Boolean).join(", ")) + (m.anticoag ? ' — ANTYKOAGULANT' : ""));
+  const choroby = (c.conditions || []).map(x => esc(x.name) + (x.icd10 ? ' (' + esc(x.icd10) + ')' : "")
+    + (x.status ? ' — ' + esc(x.status) : ""));
+  const kontakty = (c.contacts || []).map(k => esc(k.name) + (k.relation ? ', ' + esc(k.relation) : "")
+    + ' — ' + esc(k.phone) + (k.primary ? ' (pierwszy)' : ""));
+  const flagi = []
+    .concat(p.dnr ? ["zgłoszone oświadczenie DNR"] : [])
+    .concat(p.donor ? ["zgoda na pobranie narządów"] : [])
+    .concat(p.devices ? [esc(p.devices)] : [])
+    .concat(p.note ? [esc(p.note)] : []);
+
+  return '<div class="druk">'
+  + '<div class="druk-head"><div>'
+  +   '<p class="eyebrow">Karta ratunkowa HERO · MediTag</p>'
+  +   '<h2>' + esc(p.name || "Pacjent nieznany") + '</h2>'
+  +   '<p class="small">' + esc(fmtD(p.birthDate)) + (a !== null ? ' · ' + a + ' lat' : "")
+  +     ' · grupa krwi <span class="waga">' + esc((p.blood || "?") + (p.rh || "")) + '</span>'
+  +     (p.weightKg ? ' · ' + esc(p.weightKg) + ' kg' : "") + '</p>'
+  +   (p.langs ? '<p class="tiny muted">Języki kontaktu: ' + esc(p.langs) + '</p>' : "")
+  + '</div>' + (url ? qrSvg(url, "Kod QR z adresem karty " + card.tagId) : "") + '</div>'
+  + sekcja("Alergie", lista(alergie, "Nie zgłoszono żadnej alergii."))
+  + sekcja("Przyjmowane leki", lista(leki, "Nie zgłoszono leków."))
+  + sekcja("Choroby przewlekłe", lista(choroby, "Nie zgłoszono chorób przewlekłych."))
+  + (flagi.length ? sekcja("Uwagi istotne dla zespołu", lista(flagi, "")) : "")
+  + sekcja("Kontakty alarmowe", lista(kontakty, "Brak kontaktów alarmowych."))
+  + '<div class="stopka"><span>Karta <span class="tagid">' + esc(card.tagId) + '</span> · aktualizacja '
+  +   esc(fmtDT(card.updatedAt)) + '</span>'
+  +   '<span>Prototyp. Nie jest wyrobem medycznym i nie zastępuje wywiadu ratowniczego.</span></div>'
+  + '</div>';
+}
+
+/** Ekran wydruku: sama karta i dwa przyciski, których na papierze nie będzie. */
+function renderPrint(card, wroc){
+  view.innerHTML = printHTML(card)
+  + '<div class="row bez-druku" style="margin-top:1rem;justify-content:center">'
+  +   '<button class="btn btn-primary" id="doDruku">Drukuj</button>'
+  +   '<button class="btn" id="wrocZDruku">Wróć</button>'
+  + '</div>'
+  + '<p class="tiny muted bez-druku" style="text-align:center;margin-top:.6rem">Wydruk mieści się na jednej stronie. Kod QR prowadzi pod ten sam adres co opaska.</p>';
+  document.getElementById("doDruku").addEventListener("click", () => window.print());
+  document.getElementById("wrocZDruku").addEventListener("click", wroc);
+}
+
 /* ---------------- opaska: ekran po zbliżeniu ---------------- */
 /** Przełącznik roli. Adres w opasce jest jeden, więc rolę trzeba dać się zmienić ręcznie. */
 function roleBar(tagId, biezaca){
   const b = (k, etykieta) => '<a class="btn btn-sm'+(biezaca===k?" btn-primary":"")+'" href="#/t/'+encodeURIComponent(tagId)+'?rola='+k+'">'+etykieta+'</a>';
   return '<div class="panel"><div class="panel-h">'
-  + '<div><p class="eyebrow">Opaska <span class="mono">'+esc(tagId)+'</span></p><h3>Kto zbliżył opaskę?</h3></div>'
+  + '<div><p class="eyebrow">Opaska <span class="tagid">'+esc(tagId)+'</span></p><h3>Kto zbliżył opaskę?</h3></div>'
   + '<div class="row" style="margin-left:auto">'+b("ratownik","Ratownik")+b("lekarz","Lekarz")+b("pacjent","To moja karta")+'</div>'
   + '</div></div>';
 }
@@ -1187,7 +1829,7 @@ function tagGate(tagId, rola){
     if(doc){
       const entry = await store.logRead(tagId, DOCTOR.name + ", PWZ " + DOCTOR.pwz, "dostęp lekarza");
       r.card.reads = [entry].concat(r.card.reads || []);
-    } else markOwner(tagId);
+    } else markOwner(tagId, r.card.person && r.card.person.name);
     CARD = r.card; ROLE = doc ? "lekarz" : "pacjent"; TAB = "podstawowe";
     ses.set({tagId, role:ROLE, dg:PIN_DG});
     renderEditor();
@@ -1199,8 +1841,13 @@ async function tagReadout(tagId){
   const card = await store.get(tagId);
   if(!card){
     view.innerHTML = '<div class="stack" style="max-width:760px;margin-inline:auto">' + roleBar(tagId, "ratownik")
-    + '<div class="notice crit"><span>Opaska <b class="mono">'+esc(tagId)+'</b> wskazuje kartę, której nie ma '
+    + '<div class="notice crit"><span>Opaska <b class="tagid">'+esc(tagId)+'</b> wskazuje kartę, której nie ma '
     + (API ? "w bazie tego serwera." : "w pamięci tej przeglądarki.") + ' Karta mogła zostać usunięta.</span></div></div>';
+    return;
+  }
+  if(card.revoked){
+    view.innerHTML = '<div class="stack" style="max-width:760px;margin-inline:auto">' + roleBar(tagId, "ratownik")
+    + revokedHTML(tagId, card.revokedAt) + '</div>';
     return;
   }
   const entry = await store.logRead(tagId, "odczyt po zbliżeniu opaski", "odczyt ratunkowy");

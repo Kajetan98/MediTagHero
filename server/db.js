@@ -21,7 +21,8 @@ export function openDatabase(file = process.env.HERO_DB || "data/hero.sqlite") {
       data       TEXT NOT NULL,
       demo       INTEGER NOT NULL DEFAULT 0,
       updated_at TEXT NOT NULL,
-      updated_by TEXT NOT NULL DEFAULT 'pacjent'
+      updated_by TEXT NOT NULL DEFAULT 'pacjent',
+      revoked_at TEXT
     );
     CREATE TABLE IF NOT EXISTS reads (
       id     TEXT PRIMARY KEY,
@@ -44,6 +45,10 @@ export function openDatabase(file = process.env.HERO_DB || "data/hero.sqlite") {
       created_at TEXT NOT NULL
     );
   `);
+  /* Kolumna dochodzi do baz założonych przed unieważnianiem opasek; `CREATE TABLE IF NOT EXISTS`
+     istniejącej tabeli nie rusza, więc bez tego zapis do revoked_at wywracałby zapytania. */
+  const kolumny = db.prepare("PRAGMA table_info(cards)").all().map(r => r.name);
+  if (!kolumny.includes("revoked_at")) db.exec("ALTER TABLE cards ADD COLUMN revoked_at TEXT");
   return {
     cards: new CardStore(db),
     doctors: new DoctorStore(db),
@@ -69,7 +74,8 @@ class CardStore {
   publicCard(tagId) {
     const row = this.db.prepare("SELECT * FROM cards WHERE tag_id = ?").get(tagId);
     if (!row) return null;
-    return { tagId: row.tag_id, demo: !!row.demo, updatedAt: row.updated_at, updatedBy: row.updated_by, ...JSON.parse(row.data) };
+    return { tagId: row.tag_id, demo: !!row.demo, updatedAt: row.updated_at, updatedBy: row.updated_by,
+      revokedAt: row.revoked_at || null, ...JSON.parse(row.data) };
   }
 
   /** Pełna karta wraz z historią odczytów — tylko po weryfikacji PIN-u. */
@@ -86,7 +92,7 @@ class CardStore {
    * `demoOnly` zawęża wynik do kart przykładowych i tylko taką listę oddaje API.
    */
   list(demoOnly = false) {
-    const where = demoOnly ? "WHERE demo = 1 " : "";
+    const where = demoOnly ? "WHERE demo = 1 AND revoked_at IS NULL " : "WHERE revoked_at IS NULL ";
     return this.db.prepare(`SELECT tag_id, name, demo, updated_at FROM cards ${where}ORDER BY updated_at DESC`).all()
       .map(r => ({ tagId: r.tag_id, name: r.name, demo: !!r.demo, updatedAt: r.updated_at }));
   }
@@ -152,6 +158,63 @@ class CardStore {
         .run(tagId, str(person.name), hashSecret(body.pinHash), payload, trusted && body.demo ? 1 : 0, now, updatedBy);
     }
     return { status: exists ? 200 : 201, card: this.fullCard(tagId) };
+  }
+
+  /**
+   * Zmiana PIN-u bez usuwania karty. Skrót przysyła przeglądarka (`hero:<tag>:<pin>`), serwer
+   * przepuszcza go przez scrypt z nową solą. Historia odczytów i treść karty zostają nietknięte.
+   */
+  changePin(tagId, digest, nowyHash) {
+    if (!this.has(tagId)) return { status: 404, error: "Nie ma karty o tym identyfikatorze" };
+    if (!this.checkPin(tagId, digest)) return { status: 403, error: "Nieprawidłowy PIN karty" };
+    if (!nowyHash) return { status: 400, error: "Zmiana PIN-u wymaga pola pinHash" };
+    if (nowyHash === digest) return { status: 409, error: "Nowy PIN jest taki sam jak stary" };
+    this.db.prepare("UPDATE cards SET pin = ? WHERE tag_id = ?").run(hashSecret(nowyHash), tagId);
+    return { status: 204 };
+  }
+
+  /** Czy opaska jest unieważniona. Odczyt ratunkowy pod tym adresem ma wtedy odpaść, nie oddać kartę. */
+  revokedAt(tagId) {
+    const row = this.db.prepare("SELECT revoked_at FROM cards WHERE tag_id = ?").get(tagId);
+    return row ? row.revoked_at || null : null;
+  }
+
+  /**
+   * Unieważnienie zgubionej opaski. Adres zostaje w bazie jako nagrobek: stary identyfikator ma
+   * odpowiadać „opaska unieważniona", a nie „nie ma takiej karty" — ratownik, który zbliżył starą
+   * opaskę, musi wiedzieć, że trafił na odciętą, a nie na zepsuty serwis. Treść karty zostaje,
+   * bo pacjent otwiera ją dalej PIN-em i może przenieść na nową opaskę. Operacji nie da się cofnąć.
+   */
+  revoke(tagId, digest) {
+    if (!this.has(tagId)) return { status: 404, error: "Nie ma karty o tym identyfikatorze" };
+    if (!this.checkPin(tagId, digest)) return { status: 403, error: "Nieprawidłowy PIN karty" };
+    const juz = this.revokedAt(tagId);
+    if (juz) return { status: 200, revokedAt: juz };
+    const at = new Date().toISOString();
+    this.db.prepare("UPDATE cards SET revoked_at = ? WHERE tag_id = ?").run(at, tagId);
+    return { status: 200, revokedAt: at };
+  }
+
+  /**
+   * Przeniesienie karty na nową opaskę. Skrót PIN-u wiąże się z identyfikatorem opaski
+   * (`hero:<tag>:<pin>`), więc nowy adres wymaga skrótu przeliczonego przez przeglądarkę dla nowego
+   * identyfikatora — samym starym skrótem karty nie da się przepisać. Stary wpis zostaje jako
+   * nagrobek: bez treści i nazwiska, z historią odczytów, która dotyczy tamtej opaski.
+   */
+  move(tagId, digest, nowy, pinHash) {
+    if (!this.has(tagId)) return { status: 404, error: "Nie ma karty o tym identyfikatorze" };
+    if (!this.checkPin(tagId, digest)) return { status: 403, error: "Nieprawidłowy PIN karty" };
+    if (!pinHash) return { status: 400, error: "Nowa opaska wymaga pola pinHash" };
+    if (nowy === tagId) return { status: 409, error: "Nowa opaska ma ten sam identyfikator" };
+    if (this.has(nowy)) return { status: 409, error: "Karta o tym identyfikatorze już istnieje" };
+
+    const row = this.db.prepare("SELECT * FROM cards WHERE tag_id = ?").get(tagId);
+    const now = new Date().toISOString();
+    this.db.prepare("INSERT INTO cards (tag_id, name, pin, data, demo, updated_at, updated_by) VALUES (?, ?, ?, ?, 0, ?, ?)")
+      .run(nowy, row.name, hashSecret(pinHash), row.data, now, row.updated_by);
+    this.db.prepare("UPDATE cards SET revoked_at = ?, data = ?, name = '' WHERE tag_id = ?")
+      .run(now, JSON.stringify({ person: {} }), tagId);
+    return { status: 201, card: this.fullCard(nowy) };
   }
 
   remove(tagId, digest) {

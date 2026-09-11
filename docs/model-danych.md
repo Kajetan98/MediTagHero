@@ -7,14 +7,17 @@ czasu leży w kolumnie `data` jako JSON, żeby zmiana zakresu karty nie wymagał
 
 ```sql
 cards (
-  tag_id     TEXT PRIMARY KEY,   -- identyfikator opaski, np. HERO-2481-KX
+  tag_id     TEXT PRIMARY KEY,   -- identyfikator opaski: HERO- i 128 bitów w base32 Crockforda
+                                 -- (stare, krótkie jak HERO-2481-KX działają dalej)
   name       TEXT,               -- zdenormalizowane na potrzeby listy
   pin        TEXT,               -- scrypt$<sól>$<klucz> ze skrótu przysłanego przez przeglądarkę
   data       TEXT,               -- JSON: person, allergies, meds, conditions, contacts
   demo       INTEGER,            -- 1 dla kart przykładowych; tylko te wychodzą w GET /api/cards
                                  -- ustawia je wyłącznie zapis z `trusted`, nie żądanie HTTP
   updated_at TEXT,               -- ISO 8601
-  updated_by TEXT                -- 'pacjent' | 'lekarz' | 'przykład'; nadaje serwer z konta zapisu
+  updated_by TEXT,               -- 'pacjent' | 'lekarz' | 'przykład'; nadaje serwer z konta zapisu
+  revoked_at TEXT                -- NULL dla opaski czynnej; data unieważnienia dla odciętej
+                                 -- (kolumna dochodzi migracją do baz założonych wcześniej)
 )
 
 reads (
@@ -41,7 +44,7 @@ doctors (
 doctor_sessions (
   token      TEXT PRIMARY KEY,   -- losowe 24 bajty, nagłówek x-hero-doctor
   doctor_id  TEXT REFERENCES doctors(id) ON DELETE CASCADE,
-  created_at TEXT
+  created_at TEXT                -- token żyje dobę od wydania; starszy kasuje się przy pierwszym użyciu
 )
 ```
 
@@ -140,9 +143,28 @@ bo ten sam plik chodzi też poza serwerem HERO, gdzie ścieżki nikt nie routuje
 
 Adres jest jeden dla wszystkich, więc zakres po zbliżeniu wybiera przeglądarka: otwarta sesja
 karty wchodzi prosto do edytora, zalogowane konto lekarza dostaje pytanie o PIN pacjenta, reszta
-odczyt ratunkowy. Identyfikatory opasek otwartych PIN-em pacjenta leżą w `localStorage` pod
-kluczem `hero.owners.v1` — to podpowiedź do wyboru roli, nie uprawnienie: kartę i tak otwiera
-dopiero PIN, a odczyt ratunkowy jest jawny dla każdego, kto zna identyfikator.
+odczyt ratunkowy. Opaski otwarte PIN-em pacjenta leżą w `localStorage` pod kluczem `hero.owners.v1`
+jako `{tag, name, at}` — to podpowiedź do wyboru roli i lista na ekranie pacjenta, nie uprawnienie:
+kartę i tak otwiera dopiero PIN, a odczyt ratunkowy jest jawny dla każdego, kto zna identyfikator.
+
+**Identyfikator opaski nadaje przeglądarka i ma 128 bitów losowości** (`genTag` w bloku `NFC`,
+base32 Crockforda bez I, L, O i U, `HERO-` plus 26 znaków). Skoro sam identyfikator otwiera odczyt
+ratunkowy, jego długość jest tu jedyną ochroną przed zgadywaniem. Serwer formatu nie wymusza — bierze
+każdy identyfikator pasujący do `TAG` (do 32 znaków), bo karty założone wcześniej i karta przykładowa
+z `npm run seed` mają identyfikatory krótkie. Nikt takiego identyfikatora nie wpisze z pamięci, więc
+ekran pacjenta podaje listę opasek znanych tej przeglądarce, a pełny identyfikator zostaje w opasce
+i w kodzie QR.
+
+**Unieważniona opaska zostaje w bazie jako nagrobek.** `revoked_at` nie usuwa wiersza: stary adres ma
+odpowiadać „opaska unieważniona" (410), a nie „nie ma takiej karty" (404), bo to dwie różne informacje
+dla ratownika, który właśnie zbliżył telefon. Unieważnienie zostawia treść karty — pacjent otwiera ją
+dalej PIN-em i może przenieść na nową opaskę. Przeniesienie (`move`) zakłada wiersz pod nowym
+identyfikatorem z tą samą treścią i tym samym PIN-em, a stary czyści z treści i nazwiska, zostawiając
+mu historię odczytów: historia dotyczy opaski, nie pacjenta, więc nowa startuje pusta.
+
+Nowy adres wymaga skrótu PIN-u przeliczonego dla niego, bo skrót wiąże się z identyfikatorem opaski
+(`hero:<tag>:<pin>`). Dlatego przeniesienie pyta pacjenta o PIN jeszcze raz, choć sesja jest otwarta:
+przeglądarka trzyma sam skrót, nie PIN.
 
 **Identyfikatory wpisów nadaje przeglądarka** (`Math.random`), bo wpisy nie wychodzą poza jedną kartę.
 Identyfikatory odczytów nadaje serwer (`randomUUID`), bo są dowodem dostępu — poza trybem bez

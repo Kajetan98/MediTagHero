@@ -13,6 +13,13 @@ import { hashSecret, verifySecret } from "./secrets.js";
  */
 export const PWZ = /^[0-9]{7}$/;
 const MIN_PASSWORD = 8;
+/**
+ * Ile godzin żyje token sesji. Konto lekarza otwiera cudzą kartę medyczną, a token leży
+ * w przeglądarce na cudzym sprzęcie — bez terminu ważności zostawałby tam do końca świata.
+ * Doba to kompromis: dyżur mieści się w całości, a zapomniane zalogowanie wygasa do następnego.
+ */
+const SESSION_HOURS = 24;
+const wygasle = () => new Date(Date.now() - SESSION_HOURS * 3600_000).toISOString();
 
 export class DoctorStore {
   constructor(db) { this.db = db; }
@@ -41,22 +48,42 @@ export class DoctorStore {
     // sprawdzać, które numery PWZ mają u nas konto.
     if (!row || !verifySecret(password, row.pass)) return { status: 403, error: "Nieprawidłowy numer PWZ albo hasło" };
 
+    /* Przy okazji logowania sprzątamy to, co i tak już nie działa. */
+    this.db.prepare("DELETE FROM doctor_sessions WHERE created_at <= ?").run(wygasle());
     const token = randomBytes(24).toString("base64url");
     this.db.prepare("INSERT INTO doctor_sessions (token, doctor_id, created_at) VALUES (?, ?, ?)")
       .run(token, row.id, new Date().toISOString());
     return { status: 200, token, doctor: { id: row.id, pwz: row.pwz, name: row.name } };
   }
 
-  /** Sesje nie wygasają — do domknięcia razem z resztą uwierzytelniania. */
+  /** Konto z tokenu. Token starszy niż `SESSION_HOURS` nie jest już niczyim kontem i znika. */
   bySession(token) {
     if (!token) return null;
-    return this.db.prepare(
-      "SELECT d.id, d.pwz, d.name FROM doctor_sessions s JOIN doctors d ON d.id = s.doctor_id WHERE s.token = ?"
-    ).get(String(token)) ?? null;
+    const klucz = String(token);
+    const row = this.db.prepare(
+      "SELECT d.id, d.pwz, d.name, s.created_at AS at FROM doctor_sessions s JOIN doctors d ON d.id = s.doctor_id WHERE s.token = ?"
+    ).get(klucz);
+    if (!row) return null;
+    if (row.at <= wygasle()) {
+      this.db.prepare("DELETE FROM doctor_sessions WHERE token = ?").run(klucz);
+      return null;
+    }
+    return { id: row.id, pwz: row.pwz, name: row.name };
   }
 
   logout(token) {
     this.db.prepare("DELETE FROM doctor_sessions WHERE token = ?").run(String(token ?? ""));
+  }
+
+  /** Wylogowanie ze wszystkich urządzeń: po zgubieniu telefonu jeden token to za mało. */
+  logoutAll(doctorId) {
+    this.db.prepare("DELETE FROM doctor_sessions WHERE doctor_id = ?").run(String(doctorId ?? ""));
+  }
+
+  /** Ile sesji ma to konto — tyle urządzeń jest zalogowanych. */
+  sessions(doctorId) {
+    return this.db.prepare("SELECT COUNT(*) AS n FROM doctor_sessions WHERE doctor_id = ? AND created_at > ?")
+      .get(String(doctorId ?? ""), wygasle()).n;
   }
 
   count() {

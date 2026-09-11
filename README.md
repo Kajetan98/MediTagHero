@@ -18,10 +18,54 @@ flagi `--experimental-sqlite`, której serwer nie ustawia. Projekt nie ma zależ
 ```bash
 npm start          # buduje public/index.html i startuje serwer na :8080
 npm run seed       # przykładowa karta HERO-2481-KX (PIN 1234) i konto lekarza (PWZ 1234567, hasło meditag123)
-npm test           # testy API (node:test)
+npm run cert       # certyfikat samopodpisany do testów po HTTPS (wymaga openssl)
+npm test           # testy API, identyfikatora opaski i kodera QR (node:test)
 ```
 
 Baza powstaje w `data/hero.sqlite`; ścieżkę zmienia zmienna `HERO_DB`, port — `PORT`.
+
+### HTTPS
+
+Zapis opaski i skrót PIN-u liczony przez `crypto.subtle` wymagają bezpiecznego kontekstu, a ten poza
+`localhost` znaczy HTTPS. Serwer nasłuchuje po TLS-ie, gdy dostanie ścieżki do klucza i certyfikatu;
+domyślny port zmienia się wtedy na 8443:
+
+```bash
+npm run cert                                                        # data/tls/{key,cert}.pem
+HERO_TLS_KEY=data/tls/key.pem HERO_TLS_CERT=data/tls/cert.pem npm start
+```
+
+Certyfikat samopodpisany wystarcza do testów w sieci lokalnej — `npm run cert` wystawia go na adresy
+IPv4 tego komputera i wypisuje adres do wpisania w telefonie. Telefon pokaże ostrzeżenie, które trzeba
+przejść ręcznie; jeśli po jego przejściu Chrome nadal nie daje Web NFC, trzeba zainstalować `cert.pem`
+w telefonie jako zaufany albo wystawić serwer przez tunel z własnym certyfikatem. Do produkcji idzie
+certyfikat z urzędu na reverse proxy — patrz [Wdrożenie](#wdrożenie).
+
+Pod TLS-em serwer dokłada `Strict-Transport-Security`. Nagłówki `Content-Security-Policy`,
+`X-Content-Type-Options`, `X-Frame-Options` i `Referrer-Policy` idą z każdą odpowiedzią niezależnie od
+protokołu. CSP dopuszcza styl i skrypt wstawione w plik, bo aplikacja jest jednym plikiem, ale zamyka
+wszystkie źródła zewnętrzne — strona nie wysyła żadnego żądania poza własny adres.
+
+### Z prawdziwą opaską, krok po kroku
+
+Do zapisania opaski potrzebny jest telefon z Androidem, Chrome i włączonym NFC. Telefon i komputer
+muszą być w tej samej sieci.
+
+1. `npm run cert` — wypisze adres w rodzaju `https://192.168.1.14:8443`. To ten adres wpiszesz
+   w telefonie, a nie `localhost`.
+2. `HERO_TLS_KEY=data/tls/key.pem HERO_TLS_CERT=data/tls/cert.pem npm start`
+3. W telefonie otwórz ten adres i przejdź ostrzeżenie o certyfikacie („Zaawansowane" → „Przejdź do…").
+4. „Moja karta" → „Załóż kartę": nazwisko i PIN. Aplikacja od razu otworzy zakładkę „Opaska NFC"
+   z adresem tej karty i kodem QR.
+5. „Zapisz kartę na opasce" → przyłóż opaskę do telefonu i przytrzymaj. „Sprawdź, co jest na opasce"
+   pokaże, co się zapisało.
+6. Zablokuj ekran, zbliż opaskę: telefon otworzy kartę. Na twoim telefonie zapyta o PIN, bo ta
+   przeglądarka już tę kartę otwierała; na cudzym pokaże odczyt ratunkowy bez pytania o nic.
+
+Jeśli „Zapisz kartę na opasce" jest wyszarzone, powód jest jeden z trzech: strona chodzi po `http://`
+zamiast `https://`, przeglądarka nie jest Chrome na Androidzie, albo moduł NFC jest wyłączony
+w ustawieniach telefonu. Zostaje wtedy kod QR i zapis adresu dowolną aplikacją do NFC jako rekord
+typu URL.
 
 Bez uruchomionego serwera ten sam plik działa samodzielnie: aplikacja wykrywa brak `/api/health`
 i zapisuje karty w `localStorage` przeglądarki — razem ze skrótem PIN-u i historią odczytów, bo nic
@@ -31,9 +75,13 @@ nie opuszcza tej jednej przeglądarki. W tym trybie działa jako demo i jako Art
 
 | Rola | Czym się uwierzytelnia | Co może |
 |---|---|---|
-| Pacjent | identyfikator opaski + PIN | prowadzi całą kartę, widzi historię odczytów, kasuje kartę |
+| Pacjent | identyfikator opaski + PIN | prowadzi całą kartę, widzi historię odczytów, zmienia PIN, unieważnia opaskę i kasuje kartę |
 | Lekarz | konto z numerem PWZ + identyfikator opaski + PIN pacjenta | ten sam edytor co pacjent, bez usuwania karty; każdy jego wpis niesie nazwisko i numer PWZ |
 | Ratownik | sam identyfikator opaski | odczyt zestawu krytycznego, bez PIN-u; odczyt trafia do historii |
+
+Token sesji lekarza żyje dobę od wydania: dyżur mieści się w całości, a zalogowanie zapomniane na
+cudzym sprzęcie wygasa do następnego. Pierwsze użycie wygasłego tokenu kasuje go z bazy, a przycisk
+„Wyloguj wszędzie" unieważnia wszystkie tokeny konta naraz.
 
 Podpisu lekarza nie nadaje żądanie — nadaje go serwer z konta, którym uwierzytelniono zapis. Wpis
 zachowuje podpis, który już ma, tylko gdy leżał z nim w bazie i nie zmienił treści: podpis dotyczy
@@ -61,6 +109,12 @@ localhost) i po kliknięciu. Gdzie indziej — w tym na iOS — przyciski są wy
 do skopiowania i zapisania dowolną aplikacją do NFC jako rekord typu URL. Ratownik do odczytu żadnej
 aplikacji nie potrzebuje: Android i iOS otwierają adres z opaski same.
 
+Obok adresu jest kod QR z tą samą treścią. Działa tam, gdzie NFC nie: na telefonie bez czytnika,
+na iOS, przy wyłączonym module NFC i po wydrukowaniu. Koder siedzi w `web/app.html` (tryb bajtowy,
+korekcja M, wersje 1–10, czyli do 213 bajtów) i nie ma zależności — kod powstaje jako SVG w treści
+strony, więc nie wychodzi z niej żadne żądanie. Zostaje czarny na białym także w ciemnym motywie,
+bo skaner czyta kontrast, nie motyw.
+
 Po zbliżeniu opaski otwiera się jeden adres, a zakres zależy od tego, kto go otworzył:
 
 | Kto zbliżył | Co widzi |
@@ -75,6 +129,30 @@ otwarto PIN-em pacjenta, leżą w `localStorage` pod kluczem `hero.owners.v1`, a
 stamtąd kasuje. Zakres i tak otwiera dopiero PIN, a odczyt ratunkowy jest jawny dla każdego, kto zna
 identyfikator opaski — z podpowiedzi albo bez niej. Rolę można przełączyć ręcznie paskiem nad kartą.
 
+### Karta do portfela
+
+Przycisk „Wydrukuj kartę do portfela" w tej samej zakładce składa zestaw krytyczny na jedną stronę:
+czarno na białym, w kolejności z odczytu ratunkowego (alergie, leki z wyróżnionymi antykoagulantami,
+choroby, wszczepy i uwagi, kontakt alarmowy), z kodem QR prowadzącym pod adres karty. To zapas na
+sytuację, w której telefon pacjenta jest rozładowany, a opaski nie ma czym odczytać. Styl `@media print`
+zdejmuje z wydruku pasek górny, stopkę i przyciski.
+
+### Zgubiona opaska
+
+Sam identyfikator z opaski otwiera odczyt ratunkowy, więc opaska zgubiona jest kluczem do zestawu
+krytycznego dopóty, dopóki pacjent jej nie odetnie. W zakładce „Opaska NFC" są na to dwie drogi:
+
+- **unieważnienie** — adres przestaje oddawać kartę: `GET /api/cards/:tag` odpowiada 410, a nie 404,
+  bo ratownik ze starą opaską w ręku ma wiedzieć, że trafił na odciętą, a nie na zepsuty serwis.
+  Treść karty zostaje, pacjent otwiera ją dalej PIN-em. Operacji nie da się cofnąć;
+- **przeniesienie na nową opaskę** — to samo, plus kopia karty pod nowym identyfikatorem. Pod starym
+  zostaje nagrobek: historia odczytów tamtej opaski, bez treści karty. Nowa opaska startuje z pustą
+  historią, bo historia dotyczy opaski, nie pacjenta.
+
+Przeniesienie pyta o PIN jeszcze raz, mimo otwartej sesji. Skrót PIN-u wiąże się z identyfikatorem
+opaski (`hero:<tag>:<pin>`), więc nowy adres wymaga skrótu przeliczonego dla niego, a przeglądarka
+trzyma sam skrót, nie PIN. Sam PIN się nie zmienia.
+
 Bez serwera HERO karta leży w pamięci jednej przeglądarki. Opaska zaprowadzi pod ten sam adres każdy
 telefon, ale kartę znajdzie pod nim tylko ta jedna przeglądarka; opaska, która ma zadziałać
 u ratownika, wymaga serwera.
@@ -83,7 +161,9 @@ u ratownika, wymaga serwera.
 
 ```
 web/app.html      źródło aplikacji (jeden plik: style + widoki + logika)
+Dockerfile        obraz serwera; .dockerignore trzyma poza nim bazę, testy i dokumentację
 tools/build.mjs   opakowuje web/app.html w public/index.html
+tools/cert.mjs    certyfikat samopodpisany do testów po HTTPS (npm run cert)
 public/           artefakt builda, serwowany przez serwer
 server/index.js   serwer HTTP i routing
 server/db.js      schemat SQLite i operacje na kartach
@@ -92,7 +172,8 @@ server/secrets.js scrypt na PIN-ach kart i hasłach lekarzy
 server/limit.js   licznik żądań w oknie czasu
 server/seed.js    przykładowa karta i konto lekarza
 test/api.test.js  testy API
-test/nfc.test.js  adres zapisywany w opasce (blok NFC wycięty z web/app.html)
+test/nfc.test.js  identyfikator i adres opaski (blok NFC wycięty z web/app.html)
+test/qr.test.js   koder kodu QR (blok QR wycięty z web/app.html)
 .github/workflows testy na każdy push i pull request (Node 22.13, 22 i 24)
 docs/             model danych i plan rozwoju
 ```
@@ -105,15 +186,19 @@ docs/             model danych i plan rozwoju
 |---|---|---|---|
 | GET | `/api/health` | — | stan usługi i liczba kart w bazie |
 | GET | `/api/cards` | — | lista kart przykładowych (identyfikator, nazwisko, znacznik demo, data zmiany) |
-| GET | `/api/cards/:tag` | — | treść karty bez historii odczytów i bez skrótu PIN-u |
+| GET | `/api/cards/:tag` | — | treść karty bez historii odczytów i bez skrótu PIN-u; unieważniona opaska oddaje 410 |
 | POST | `/api/cards/:tag/session` | `{digest}` | pełna karta z historią odczytów |
 | PUT | `/api/cards/:tag` | nagłówek `x-hero-pin` | zapis karty; gdy karty nie ma w bazie, tworzy ją na podstawie `pinHash` (bez znacznika demo) |
 | DELETE | `/api/cards/:tag` | nagłówek `x-hero-pin` | usuwa kartę i jej historię |
+| POST | `/api/cards/:tag/pin` | nagłówek `x-hero-pin` + `{pinHash}` | zmienia PIN; karta, historia i opaska zostają |
 | POST | `/api/cards/:tag/reads` | — dla odczytu ratunkowego, `x-hero-doctor` dla dostępu lekarza | zapisuje odczyt; czas, identyfikator i kontekst nadaje serwer, przy koncie lekarza także opis czytnika |
+| POST | `/api/cards/:tag/revoke` | nagłówek `x-hero-pin` | unieważnia opaskę; adres przestaje oddawać kartę, treść karty zostaje |
+| POST | `/api/cards/:tag/move` | nagłówek `x-hero-pin` + `{tagId, pinHash}` | przenosi kartę na nową opaskę i unieważnia starą |
 | POST | `/api/doctors` | — | zakłada konto lekarza (`pwz`, `name`, `password`) |
 | POST | `/api/doctors/session` | `{pwz, password}` | loguje; zwraca token sesji |
-| GET | `/api/doctors/me` | nagłówek `x-hero-doctor` | konto z tokenu |
-| DELETE | `/api/doctors/session` | nagłówek `x-hero-doctor` | wylogowuje |
+| GET | `/api/doctors/me` | nagłówek `x-hero-doctor` | konto z tokenu wraz z liczbą zalogowanych urządzeń |
+| DELETE | `/api/doctors/session` | nagłówek `x-hero-doctor` | wylogowuje to urządzenie |
+| DELETE | `/api/doctors/sessions` | nagłówek `x-hero-doctor` | wylogowuje konto ze wszystkich urządzeń |
 
 Endpointy oznaczone „—" nie sprawdzają niczego poza poprawnością identyfikatora opaski: treść karty
 pobiera każdy, kto zna identyfikator, i każdy może dopisać wpis do historii odczytów. Karty zwykłej
@@ -124,9 +209,9 @@ kart w bazie, bez identyfikatorów.
 Dwa liczniki w `server/limit.js` (oba w pamięci procesu, oba odpowiadają 429 po przekroczeniu): zapis
 odczytu — 30 żądań na minutę z jednego adresu; próby PIN-u — 10 nieudanych na 15 minut, liczone
 osobno dla pary adres–opaska, a poprawny PIN kasuje licznik. Nieudane logowania lekarza liczy ten sam
-licznik, na osobnym kluczu. Blokada obejmuje wszystkie ścieżki
-z PIN-em: sesję, zapis i usunięcie karty. Za reverse proxy serwer widzi adres proxy, więc limit
-trzeba postawić także tam.
+licznik, na osobnym kluczu. Blokada obejmuje wszystkie ścieżki z PIN-em: sesję, zapis, zmianę PIN-u,
+unieważnienie opaski, przeniesienie karty i jej usunięcie. Za reverse proxy serwer widzi adres proxy,
+więc limit trzeba postawić także tam.
 
 `GET /api/cards/:tag` oddaje kartę w całości, także rozpoznania ze statusem `przebyta`. Zawężenie do
 zestawu krytycznego robi przeglądarka (`critical()` w `web/app.html`), nie serwer.
@@ -141,8 +226,10 @@ skrótu djb2, który nie jest funkcją kryptograficzną. Do produkcji potrzebny 
 Stan na dziś to działający prototyp, nie system produkcyjny. Przed wdrożeniem trzeba domknąć:
 
 - **Odczyt ratunkowy jest jawny dla każdego, kto zna identyfikator opaski.** To świadoma decyzja
-  produktowa — ratownik nie ma czasu na logowanie — ale wymaga długiego, losowego identyfikatora
-  (nie sekwencyjnego jak w przykładach) i mechanizmu unieważniania zgubionej opaski.
+  produktowa: ratownik nie ma czasu na logowanie. Dwie rzeczy, które z niej wynikały, są już zrobione —
+  identyfikator nowej karty niesie 128 bitów losowości, a zgubioną opaskę da się unieważnić i przenieść
+  kartę na nową. Zostaje to, że formatu identyfikatora serwer nie wymusza: bierze każdy pasujący do
+  `TAG`, bo karty założone wcześniej i karta przykładowa z seeda mają identyfikatory krótkie.
 - **Numer PWZ nie jest weryfikowany.** Sprawdzamy tylko format — siedem cyfr. Nie liczymy cyfry
   kontrolnej i nie odpytujemy rejestru Naczelnej Izby Lekarskiej, więc konto nie dowodzi uprawnień.
 - **Dostęp lekarza to nadal PIN pacjenta.** Konto dokłada tożsamość i podpis, nie zmienia sposobu
@@ -150,16 +237,118 @@ Stan na dziś to działający prototyp, nie system produkcyjny. Przed wdrożenie
 - **Zapis opaski działa tylko w Chrome na Androidzie.** Web NFC nie istnieje w Safari ani w żadnej
   przeglądarce na iOS, więc pacjent z iPhone'em musi zapisać adres osobną aplikacją do NFC. Odczytu
   to nie dotyczy — adres z opaski otwierają oba systemy.
-- **Sesje lekarzy nie wygasają.**
 - **Opis czytnika przy odczycie ratunkowym jest deklaracją.** Kontekst wpisu nadaje serwer, a przy
   dostępie lekarza opis bierze się z konta. Przy odczycie ratunkowym pole „kto odczytał" nadal
   wypełnia klient: historia dowodzi, że ktoś sięgnął po kartę, nie tego, kto to był.
-- **Brak TLS po stronie serwera** (zakładany reverse proxy). Limit prób PIN-u działa, ale licznik
-  żyje w pamięci procesu: restart serwera go zeruje, a przy kilku instancjach każda liczy osobno.
+- **Licznik prób żyje w pamięci procesu.** Restart serwera go zeruje, a przy kilku instancjach każda
+  liczy osobno. Za reverse proxy dochodzi to, że serwer widzi adres proxy zamiast klienta, więc limit
+  musi stać także w proxy (przykład w [Wdrożeniu](#wdrożenie)).
 - **Skrót PIN-u siedzi w `sessionStorage`** na czas sesji przeglądarki.
 - **RODO.** Dane o zdrowiu to szczególna kategoria danych osobowych (art. 9 RODO). Przed produkcją:
   ocena skutków dla ochrony danych, szyfrowanie bazy w spoczynku, retencja i eksport danych,
   umowy powierzenia przetwarzania.
+
+## Wdrożenie
+
+Serwer to jeden proces Node i plik SQLite obok niego; zależności z npm nie ma żadnych. TLS kończy
+się na reverse proxy — serwer umie HTTPS sam (patrz [HTTPS](#https)), ale certyfikat z urzędu,
+przekierowanie z portu 80 i limit żądań wygodniej trzymać w proxy.
+
+### Kontener
+
+```bash
+docker build -t hero .
+docker run -d --name hero -p 127.0.0.1:8080:8080 -v hero-data:/data --restart unless-stopped hero
+```
+
+`public/index.html` powstaje przy budowaniu obrazu, więc kontener nie zapisuje nic w katalogu
+aplikacji. Baza leży w wolumenie (`/data/hero.sqlite`), bo bez `-v` zniknęłaby razem z kontenerem.
+Proces chodzi bez roota, a `HEALTHCHECK` odpytuje `/api/health`. Kartę przykładową w świeżej bazie
+zakłada `docker exec hero node --no-warnings server/seed.js`.
+
+### Bez kontenera
+
+```ini
+# /etc/systemd/system/hero.service
+[Unit]
+Description=HERO — karta ratunkowa MediTag
+After=network.target
+
+[Service]
+Type=simple
+User=hero
+WorkingDirectory=/opt/hero
+Environment=PORT=8080
+Environment=HERO_DB=/var/lib/hero/hero.sqlite
+ExecStart=/usr/bin/node --no-warnings server/index.js
+Restart=on-failure
+StateDirectory=hero
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
+```
+
+`ExecStart` nie buduje aplikacji, więc `npm run build` musi pójść przy wdrożeniu — inaczej serwer
+odda stare `public/index.html`.
+
+### Reverse proxy
+
+```nginx
+# w bloku http
+limit_req_zone $binary_remote_addr zone=hero:10m rate=10r/s;
+
+server {
+    listen 443 ssl;
+    http2 on;
+    server_name hero.example;
+
+    ssl_certificate     /etc/letsencrypt/live/hero.example/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/hero.example/privkey.pem;
+
+    # Serwer widzi adres proxy, nie klienta, więc jego własny limit tu nie wystarcza.
+    limit_req zone=hero burst=20 nodelay;
+
+    location / {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+
+server {
+    listen 80;
+    server_name hero.example;
+    return 301 https://$host$request_uri;
+}
+```
+
+W Caddym to samo mieści się w trzech wierszach i samo bierze certyfikat:
+
+```caddy
+hero.example {
+    reverse_proxy 127.0.0.1:8080
+}
+```
+
+Serwer nie czyta `X-Forwarded-For` — liczniki z `server/limit.js` widzą adres proxy, więc za proxy
+liczą wszystkich razem. To dlatego limit musi stać także w proxy.
+
+### Kopia zapasowa
+
+Baza chodzi w trybie WAL, więc kopiowanie samego pliku przy działającym serwerze potrafi dać kopię
+niespójną. Do kopii idzie polecenie SQLite albo zatrzymanie usługi na czas kopiowania:
+
+```bash
+sqlite3 /var/lib/hero/hero.sqlite ".backup '/var/backups/hero-$(date +%F).sqlite'"
+```
+
+Dane o zdrowiu to szczególna kategoria danych osobowych, więc kopie wymagają szyfrowania i terminu
+ważności na równi z bazą. Patrz punkt o RODO w [planie rozwoju](docs/plan-rozwoju.md).
 
 ## Logo
 

@@ -30,17 +30,23 @@ Sam limit trzeba przenieść na wspólny magazyn, gdy serwer przestanie być jed
 
 ## 3. Identyfikator opaski
 
-Dziś identyfikator ma postać `HERO-2481-KX` — czytelną, ale zbyt krótką i zbyt regularną, żeby
-chroniła cokolwiek przed zgadywaniem. Do produkcji:
+Zrobione: identyfikator nowej karty to 128 bitów losowości w base32 Crockforda (`genTag`), adres
+zapisywany w opasce ma ustalony kształt (rekord NDEF typu URL, trasa `#/t/<identyfikator>`),
+a zgubioną opaskę da się unieważnić — stary adres oddaje wtedy 410 z datą unieważnienia — albo
+przenieść kartę na nową opaskę jednym ruchem. Karty ze starymi, krótkimi identyfikatorami działają
+dalej.
 
-- identyfikator losowy, co najmniej 128 bitów, kodowany base32 w adresie zapisanym w tagu NFC,
-- osobny, krótki numer serwisowy nadrukowany na opasce (do zgłoszenia zgubienia, nie do odczytu),
-- unieważnianie: pacjent zgłasza utratę, stary adres zwraca informację o unieważnieniu zamiast karty,
-- przypisanie opaski do karty jako osobna encja (`tags`), bo jeden pacjent może mieć opaskę i kartę
-  na telefonie, a opaskę wymienia się częściej niż kartę.
+Zostaje:
 
-Kształt samego adresu jest już rozstrzygnięty i zapisuje go aplikacja: rekord NDEF typu URL
-z trasą `#/t/<identyfikator>`. Do zrobienia zostaje treść identyfikatora, nie sposób jego zapisu.
+- **osobny, krótki numer serwisowy** nadrukowany na opasce, do zgłoszenia zgubienia, nie do odczytu.
+  Dziś unieważnia się opaskę z karty, więc pacjent musi mieć dostęp do karty; numer serwisowy
+  przydaje się, gdy zgłasza utratę ktoś inny albo gdy zgłoszenie idzie poza aplikację.
+- **wymuszenie długości po stronie serwera** — dziś serwer bierze każdy identyfikator pasujący do
+  `TAG` (do 32 znaków), bo inaczej odciąłby karty założone wcześniej i kartę przykładową z seeda.
+- **przypisanie opaski do karty jako osobna encja** (`tags`), bo jeden pacjent może mieć opaskę i kartę
+  na telefonie, a opaskę wymienia się częściej niż kartę. Dziś przeniesienie robi kopię karty pod nowym
+  identyfikatorem i zostawia nagrobek — działa, ale historia odczytów zostaje przy starej opasce,
+  a nie przy pacjencie.
 
 ## 4. Konta lekarzy
 
@@ -54,8 +60,10 @@ Zostaje:
   źródle, zanim zaczną odrzucać numery: błędny algorytm zablokuje prawdziwych lekarzy.
 - **dostęp nadawany przez pacjenta** — kod jednorazowy z terminem ważności i możliwością odebrania,
   zamiast współdzielenia PIN-u karty.
-- **cykl życia sesji** — tokeny nie wygasają i nie da się wylogować ze wszystkich urządzeń. Limit
-  nieudanych prób logowania już działa, na tym samym liczniku co PIN karty.
+- ~~cykl życia sesji~~ — zrobione: token żyje dobę od wydania, wygasły kasuje się przy pierwszym
+  użyciu, a „Wyloguj wszędzie" unieważnia wszystkie tokeny konta. Do rozważenia zostaje przedłużanie
+  ważności przy pracy i lista urządzeń z osobnym wylogowaniem każdego. Limit nieudanych prób
+  logowania działa na tym samym liczniku co PIN karty.
 - **historia zmian** — dziś zmiana treści podpisanego wpisu unieważnia podpis i nadaje nowy, więc
   widać ostatniego autora, ale nie poprzednich. Do rozważenia osobny dziennik zmian.
 
@@ -96,10 +104,11 @@ odczytu i czy dane trafiają do tej samej karty pacjenta.
 Wcześniejsze punkty zakładają, że ratownik ma działający telefon z NFC i zasięg. Każde z tych
 założeń bywa fałszywe, a karta ma sens tylko wtedy, gdy da się ją odczytać:
 
-- kod QR z tym samym adresem obok tagu NFC — dla telefonów bez NFC i dla sytuacji, w której
-  czytnik jest wyłączony,
-- widok do druku (`@media print`) i eksport karty do PDF: kartka w portfelu jako zapas przy
-  rozładowanym telefonie pacjenta,
+- ~~kod QR z tym samym adresem obok tagu NFC~~ — zrobione: kod QR z adresem karty jest w zakładce
+  „Opaska NFC", koder w `web/app.html`, bez zależności,
+- ~~widok do druku (`@media print`)~~ — zrobione: „Wydrukuj kartę do portfela" w zakładce „Opaska NFC"
+  składa zestaw krytyczny na jedną stronę, z kodem QR. Eksport do PDF robi okno drukowania przeglądarki,
+  osobnego generatora nie ma,
 - odczyt ratunkowy dostępny offline (service worker), bo w karetce brak zasięgu jest normą,
 - wersja angielska odczytu. Model ma pole `person.langs`, ale interfejs jest wyłącznie polski —
   dotyczy to zarówno pacjenta za granicą, jak i obcokrajowca leczonego w Polsce.
@@ -112,13 +121,17 @@ odczycie ratunkowym nikt nie sprawdzi u pacjenta.
 
 - wspólny magazyn dla liczników z `server/limit.js` (dziś pamięć procesu: restart zeruje limit prób
   PIN-u, a każda instancja liczy osobno),
-- TLS i nagłówki bezpieczeństwa (dziś zakładany reverse proxy),
-- zmiana PIN-u bez usuwania karty,
+- ~~TLS i nagłówki bezpieczeństwa~~ — zrobione: serwer nasłuchuje po HTTPS, gdy dostanie klucz
+  i certyfikat, a nagłówki (CSP, nosniff, DENY na ramki, brak referrera, HSTS pod TLS-em) idą z każdą
+  odpowiedzią,
+- ~~zmiana PIN-u bez usuwania karty~~ — zrobione: „Zmiana PIN-u" w danych podstawowych karty; opaski
+  to nie dotyczy, bo PIN-u w niej nie ma,
 - migracje schematu (dziś `CREATE TABLE IF NOT EXISTS` przy starcie),
 - wersjonowanie karty: kto i co zmienił, z możliwością cofnięcia,
 - testy interfejsu. Z `web/app.html` sprawdzony jest sam adres opaski (`test/nfc.test.js` wycina
   blok `NFC:START … NFC:END` i uruchamia go bez przeglądarki); reszta logiki została bez testów,
   w tym `critical()`, która decyduje o zawartości odczytu ratunkowego,
 - rozszerzenie CI poza `npm test`: dziś workflow uruchamia same testy API na trzech wersjach Node-a,
-- opis wdrożenia: obraz kontenera i konfiguracja reverse proxy zakładanego w README,
+- ~~opis wdrożenia~~ — zrobione: `Dockerfile`, jednostka systemd, przykład nginx i Caddy oraz kopia
+  zapasowa bazy w sekcji „Wdrożenie" w README,
 - lista zależności Pythona dla `tools/logos.py` (skrypt wymaga Pillow).
