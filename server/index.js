@@ -129,7 +129,14 @@ export function createServer(store = openDatabase(),
       }
       if (path === "/api/doctors/me" && req.method === "GET") {
         const kto = doctor();
-        return kto ? send(res, 200, kto) : fail(res, 403, "Nieznana albo wygasła sesja lekarza");
+        return kto ? send(res, 200, { ...kto, sessions: store.doctors.sessions(kto.id) })
+                   : fail(res, 403, "Nieznana albo wygasła sesja lekarza");
+      }
+      if (path === "/api/doctors/sessions" && req.method === "DELETE") {
+        const kto = doctor();
+        if (!kto) return fail(res, 403, "Nieznana albo wygasła sesja lekarza");
+        store.doctors.logoutAll(kto.id);
+        return send(res, 204);
       }
 
       const m = path.match(/^\/api\/cards\/([^/]+)(\/session|\/reads|\/revoke|\/move)?$/);

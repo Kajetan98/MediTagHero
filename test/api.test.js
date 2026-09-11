@@ -357,3 +357,48 @@ test("kartę przenosi się na nową opaskę razem z treścią", async () => {
   assert.equal((await ruch({ tagId: "HERO-6400-KD", pinHash: digest("HERO-6400-KD", "4321") }, pinNowy)).status, 403,
     "skrótem nowej opaski nie przeniesie się starej");
 });
+
+test("token lekarza starszy niż doba przestaje być kontem", async () => {
+  const zalogowany = await J("/api/doctors/session", jsonBody("POST", { pwz: LEKARZ.pwz, password: LEKARZ.password }));
+  assert.equal(zalogowany.status, 200);
+  const token = zalogowany.body.token;
+  const naglowek = { headers: { "x-hero-doctor": token } };
+
+  assert.equal((await J("/api/doctors/me", naglowek)).status, 200);
+
+  /* Doby nie da się przeczekać w teście, więc cofamy datę wydania tokenu w bazie. */
+  const dawno = new Date(Date.now() - 25 * 3600_000).toISOString();
+  store.doctors.db.prepare("UPDATE doctor_sessions SET created_at = ? WHERE token = ?").run(dawno, token);
+
+  assert.equal((await J("/api/doctors/me", naglowek)).status, 403, "wygasły token nie otwiera konta");
+  assert.equal(
+    store.doctors.db.prepare("SELECT COUNT(*) AS n FROM doctor_sessions WHERE token = ?").get(token).n, 0,
+    "wygasła sesja znika z bazy przy pierwszym użyciu");
+
+  /* Wygasły token nie może też podpisywać wpisów ani zapisywać dostępu lekarza. */
+  const tag = "HERO-6500-KE";
+  assert.equal((await J(`/api/cards/${tag}`, jsonBody("PUT", { ...newCard(), pinHash: digest(tag, "4321") }))).status, 201);
+  const slad = await J(`/api/cards/${tag}/reads`, jsonBody("POST", { ctx: "dostęp lekarza" }, { "x-hero-doctor": token }));
+  assert.equal(slad.status, 403, "wpis o dostępie lekarza wymaga ważnego konta");
+});
+
+test("wylogowanie wszędzie unieważnia wszystkie tokeny konta", async () => {
+  const dane = jsonBody("POST", { pwz: LEKARZ.pwz, password: LEKARZ.password });
+  const pierwszy = (await J("/api/doctors/session", dane)).body.token;
+  const drugi = (await J("/api/doctors/session", dane)).body.token;
+  assert.notEqual(pierwszy, drugi);
+
+  const me = await J("/api/doctors/me", { headers: { "x-hero-doctor": drugi } });
+  assert.ok(me.body.sessions >= 2, "konto widzi, ile urządzeń jest zalogowanych");
+
+  assert.equal((await J("/api/doctors/sessions", { method: "DELETE" })).status, 403, "bez tokenu nie ma wylogowania");
+  assert.equal((await J("/api/doctors/sessions", { method: "DELETE", headers: { "x-hero-doctor": drugi } })).status, 204);
+
+  for (const t of [pierwszy, drugi]) {
+    assert.equal((await J("/api/doctors/me", { headers: { "x-hero-doctor": t } })).status, 403);
+  }
+
+  /* Ten test unieważnia też token z `before`, więc zostawiamy plik z ważnym tokenem dla kolejnych. */
+  TOKEN = (await J("/api/doctors/session", dane)).body.token;
+  assert.equal((await J("/api/doctors/me", { headers: { "x-hero-doctor": TOKEN } })).status, 200);
+});

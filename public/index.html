@@ -552,7 +552,10 @@ const doctors = {
     if(!saved) { DOCTOR = null; return null; }
     if(API && saved.token){
       const r = await fetch(api("doctors/me"), {headers:{"x-hero-doctor": saved.token}}).catch(() => null);
+      /* Token wygasa po dobie: serwer odpowiada wtedy 403 i konto trzeba otworzyć na nowo. */
       if(!r || !r.ok){ ses.doctor(null); DOCTOR = null; return null; }
+      const j = await r.json().catch(() => ({}));
+      saved.sessions = j.sessions;
     }
     DOCTOR = saved;
     return DOCTOR;
@@ -560,6 +563,13 @@ const doctors = {
   async logout(){
     if(API && DOCTOR && DOCTOR.token){
       try { await fetch(api("doctors/session"), {method:"DELETE", headers:{"x-hero-doctor": DOCTOR.token}}); } catch(e){}
+    }
+    DOCTOR = null; ses.doctor(null);
+  },
+  /** Wylogowanie ze wszystkich urządzeń — po zgubieniu telefonu jeden token to za mało. */
+  async logoutAll(){
+    if(API && DOCTOR && DOCTOR.token){
+      try { await fetch(api("doctors/sessions"), {method:"DELETE", headers:{"x-hero-doctor": DOCTOR.token}}); } catch(e){}
     }
     DOCTOR = null; ses.doctor(null);
   }
@@ -1586,15 +1596,28 @@ async function renderCardView(){
 }
 
 function docBar(){
+  const ile = Number(DOCTOR.sessions || 0);
   return '<div class="panel"><div class="panel-h">'
   + '<div><p class="eyebrow">Zalogowane konto lekarza</p>'
-  + '<h3>' + esc(DOCTOR.name) + ' <span class="mono tiny muted">PWZ ' + esc(DOCTOR.pwz) + '</span></h3></div>'
-  + '<button class="btn btn-sm" id="docOut" style="margin-left:auto">Wyloguj z konta</button>'
-  + '</div></div>';
+  + '<h3>' + esc(DOCTOR.name) + ' <span class="mono tiny muted">PWZ ' + esc(DOCTOR.pwz) + '</span></h3>'
+  + (ile > 1 ? '<p class="tiny muted">Zalogowanych urządzeń: ' + ile + '</p>' : "")
+  + '</div>'
+  + '<div class="row" style="margin-left:auto">'
+  +   '<button class="btn btn-sm" id="docOut">Wyloguj z konta</button>'
+  +   (API ? '<button class="btn btn-sm" id="docOutAll">Wyloguj wszędzie</button>' : "")
+  + '</div></div></div>';
 }
 function wireDocBar(){
   const b = document.getElementById("docOut");
   if(b) b.addEventListener("click", async () => { await doctors.logout(); ses.clear(); CARD = null; renderDoctorView(); });
+  const w = document.getElementById("docOutAll");
+  if(w) w.addEventListener("click", async () => {
+    if(!confirm("Wylogować konto ze wszystkich urządzeń? Token sesji przestanie działać także tam, gdzie zostawiłeś go otwarty.")) return;
+    await doctors.logoutAll();
+    ses.clear(); CARD = null;
+    toast("Konto wylogowane ze wszystkich urządzeń");
+    renderDoctorView();
+  });
 }
 
 /** Ekran logowania i zakładania konta lekarza. `dalej` wraca tam, skąd przyszło żądanie konta. */

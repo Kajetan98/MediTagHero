@@ -44,7 +44,7 @@ doctors (
 doctor_sessions (
   token      TEXT PRIMARY KEY,   -- losowe 24 bajty, nagłówek x-hero-doctor
   doctor_id  TEXT REFERENCES doctors(id) ON DELETE CASCADE,
-  created_at TEXT
+  created_at TEXT                -- token żyje dobę od wydania; starszy kasuje się przy pierwszym użyciu
 )
 ```
 

@@ -58,6 +58,10 @@ nie opuszcza tej jednej przeglądarki. W tym trybie działa jako demo i jako Art
 | Lekarz | konto z numerem PWZ + identyfikator opaski + PIN pacjenta | ten sam edytor co pacjent, bez usuwania karty; każdy jego wpis niesie nazwisko i numer PWZ |
 | Ratownik | sam identyfikator opaski | odczyt zestawu krytycznego, bez PIN-u; odczyt trafia do historii |
 
+Token sesji lekarza żyje dobę od wydania: dyżur mieści się w całości, a zalogowanie zapomniane na
+cudzym sprzęcie wygasa do następnego. Pierwsze użycie wygasłego tokenu kasuje go z bazy, a przycisk
+„Wyloguj wszędzie" unieważnia wszystkie tokeny konta naraz.
+
 Podpisu lekarza nie nadaje żądanie — nadaje go serwer z konta, którym uwierzytelniono zapis. Wpis
 zachowuje podpis, który już ma, tylko gdy leżał z nim w bazie i nie zmienił treści: podpis dotyczy
 treści, więc jej zmiana go unieważnia. Wpis nowy albo zmieniony dostaje podpis konta, którym idzie
@@ -170,8 +174,9 @@ docs/             model danych i plan rozwoju
 | POST | `/api/cards/:tag/move` | nagłówek `x-hero-pin` + `{tagId, pinHash}` | przenosi kartę na nową opaskę i unieważnia starą |
 | POST | `/api/doctors` | — | zakłada konto lekarza (`pwz`, `name`, `password`) |
 | POST | `/api/doctors/session` | `{pwz, password}` | loguje; zwraca token sesji |
-| GET | `/api/doctors/me` | nagłówek `x-hero-doctor` | konto z tokenu |
-| DELETE | `/api/doctors/session` | nagłówek `x-hero-doctor` | wylogowuje |
+| GET | `/api/doctors/me` | nagłówek `x-hero-doctor` | konto z tokenu wraz z liczbą zalogowanych urządzeń |
+| DELETE | `/api/doctors/session` | nagłówek `x-hero-doctor` | wylogowuje to urządzenie |
+| DELETE | `/api/doctors/sessions` | nagłówek `x-hero-doctor` | wylogowuje konto ze wszystkich urządzeń |
 
 Endpointy oznaczone „—" nie sprawdzają niczego poza poprawnością identyfikatora opaski: treść karty
 pobiera każdy, kto zna identyfikator, i każdy może dopisać wpis do historii odczytów. Karty zwykłej
@@ -210,7 +215,6 @@ Stan na dziś to działający prototyp, nie system produkcyjny. Przed wdrożenie
 - **Zapis opaski działa tylko w Chrome na Androidzie.** Web NFC nie istnieje w Safari ani w żadnej
   przeglądarce na iOS, więc pacjent z iPhone'em musi zapisać adres osobną aplikacją do NFC. Odczytu
   to nie dotyczy — adres z opaski otwierają oba systemy.
-- **Sesje lekarzy nie wygasają.**
 - **Opis czytnika przy odczycie ratunkowym jest deklaracją.** Kontekst wpisu nadaje serwer, a przy
   dostępie lekarza opis bierze się z konta. Przy odczycie ratunkowym pole „kto odczytał" nadal
   wypełnia klient: historia dowodzi, że ktoś sięgnął po kartę, nie tego, kto to był.
