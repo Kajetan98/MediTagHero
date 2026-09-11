@@ -402,3 +402,25 @@ test("wylogowanie wszędzie unieważnia wszystkie tokeny konta", async () => {
   TOKEN = (await J("/api/doctors/session", dane)).body.token;
   assert.equal((await J("/api/doctors/me", { headers: { "x-hero-doctor": TOKEN } })).status, 200);
 });
+
+test("PIN zmienia się bez ruszania karty i historii", async () => {
+  const tag = "HERO-6600-KF";
+  const stary = digest(tag, "4321"), nowy = digest(tag, "9999");
+  assert.equal((await J(`/api/cards/${tag}`, jsonBody("PUT", { ...newCard(), pinHash: stary }))).status, 201);
+  assert.equal((await J(`/api/cards/${tag}/reads`, jsonBody("POST", { by: "ZRM P-9" }))).status, 201);
+
+  const zmien = (body, pin) => J(`/api/cards/${tag}/pin`, jsonBody("POST", body, pin ? { "x-hero-pin": pin } : {}));
+  assert.equal((await zmien({ pinHash: nowy })).status, 403, "bez obecnego PIN-u nie ma zmiany");
+  assert.equal((await zmien({ pinHash: nowy }, digest(tag, "0000"))).status, 403);
+  assert.equal((await zmien({}, stary)).status, 400, "nowy PIN musi przyjść jako skrót");
+  assert.equal((await zmien({ pinHash: stary }, stary)).status, 409, "ten sam PIN to nie zmiana");
+
+  assert.equal((await zmien({ pinHash: nowy }, stary)).status, 204);
+  assert.equal((await J(`/api/cards/${tag}/session`, jsonBody("POST", { digest: stary }))).status, 403, "stary PIN już nie otwiera");
+
+  const sesja = await J(`/api/cards/${tag}/session`, jsonBody("POST", { digest: nowy }));
+  assert.equal(sesja.status, 200);
+  assert.equal(sesja.body.person.name, "Jan Kowalski", "treść karty zostaje");
+  assert.equal(sesja.body.reads.length, 1, "historia odczytów zostaje");
+  assert.equal((await J(`/api/cards/${tag}`)).status, 200, "odczyt ratunkowy działa dalej — PIN go nie dotyczy");
+});

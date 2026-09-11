@@ -54,7 +54,7 @@ nie opuszcza tej jednej przeglądarki. W tym trybie działa jako demo i jako Art
 
 | Rola | Czym się uwierzytelnia | Co może |
 |---|---|---|
-| Pacjent | identyfikator opaski + PIN | prowadzi całą kartę, widzi historię odczytów, kasuje kartę |
+| Pacjent | identyfikator opaski + PIN | prowadzi całą kartę, widzi historię odczytów, zmienia PIN, unieważnia opaskę i kasuje kartę |
 | Lekarz | konto z numerem PWZ + identyfikator opaski + PIN pacjenta | ten sam edytor co pacjent, bez usuwania karty; każdy jego wpis niesie nazwisko i numer PWZ |
 | Ratownik | sam identyfikator opaski | odczyt zestawu krytycznego, bez PIN-u; odczyt trafia do historii |
 
@@ -169,6 +169,7 @@ docs/             model danych i plan rozwoju
 | POST | `/api/cards/:tag/session` | `{digest}` | pełna karta z historią odczytów |
 | PUT | `/api/cards/:tag` | nagłówek `x-hero-pin` | zapis karty; gdy karty nie ma w bazie, tworzy ją na podstawie `pinHash` (bez znacznika demo) |
 | DELETE | `/api/cards/:tag` | nagłówek `x-hero-pin` | usuwa kartę i jej historię |
+| POST | `/api/cards/:tag/pin` | nagłówek `x-hero-pin` + `{pinHash}` | zmienia PIN; karta, historia i opaska zostają |
 | POST | `/api/cards/:tag/reads` | — dla odczytu ratunkowego, `x-hero-doctor` dla dostępu lekarza | zapisuje odczyt; czas, identyfikator i kontekst nadaje serwer, przy koncie lekarza także opis czytnika |
 | POST | `/api/cards/:tag/revoke` | nagłówek `x-hero-pin` | unieważnia opaskę; adres przestaje oddawać kartę, treść karty zostaje |
 | POST | `/api/cards/:tag/move` | nagłówek `x-hero-pin` + `{tagId, pinHash}` | przenosi kartę na nową opaskę i unieważnia starą |

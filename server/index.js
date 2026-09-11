@@ -139,7 +139,7 @@ export function createServer(store = openDatabase(),
         return send(res, 204);
       }
 
-      const m = path.match(/^\/api\/cards\/([^/]+)(\/session|\/reads|\/revoke|\/move)?$/);
+      const m = path.match(/^\/api\/cards\/([^/]+)(\/session|\/reads|\/revoke|\/move|\/pin)?$/);
       if (!m) return fail(res, 404, "Nieznany zasób");
 
       const tagId = m[1].toUpperCase();
@@ -169,6 +169,13 @@ export function createServer(store = openDatabase(),
         if (pins.blocked(pinKey)) return fail(res, 429, "Za dużo prób PIN-u do tej karty");
         const out = afterPin(store.cards.revoke(tagId, req.headers["x-hero-pin"]));
         return out.error ? fail(res, out.status, out.error) : send(res, 200, { revokedAt: out.revokedAt });
+      }
+      if (sub === "/pin") {
+        if (req.method !== "POST") return fail(res, 405, "Nieobsługiwana metoda");
+        if (pins.blocked(pinKey)) return fail(res, 429, "Za dużo prób PIN-u do tej karty");
+        const body = await readJson(req);
+        const out = afterPin(store.cards.changePin(tagId, req.headers["x-hero-pin"], body.pinHash));
+        return out.error ? fail(res, out.status, out.error) : send(res, 204);
       }
       if (sub === "/move") {
         if (req.method !== "POST") return fail(res, 405, "Nieobsługiwana metoda");

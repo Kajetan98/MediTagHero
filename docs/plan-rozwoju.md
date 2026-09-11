@@ -124,7 +124,8 @@ odczycie ratunkowym nikt nie sprawdzi u pacjenta.
 - ~~TLS i nagłówki bezpieczeństwa~~ — zrobione: serwer nasłuchuje po HTTPS, gdy dostanie klucz
   i certyfikat, a nagłówki (CSP, nosniff, DENY na ramki, brak referrera, HSTS pod TLS-em) idą z każdą
   odpowiedzią,
-- zmiana PIN-u bez usuwania karty,
+- ~~zmiana PIN-u bez usuwania karty~~ — zrobione: „Zmiana PIN-u" w danych podstawowych karty; opaski
+  to nie dotyczy, bo PIN-u w niej nie ma,
 - migracje schematu (dziś `CREATE TABLE IF NOT EXISTS` przy starcie),
 - wersjonowanie karty: kto i co zmienił, z możliwością cofnięcia,
 - testy interfejsu. Z `web/app.html` sprawdzony jest sam adres opaski (`test/nfc.test.js` wycina

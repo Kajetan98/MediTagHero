@@ -441,6 +441,22 @@ const store = {
     if(API){ await fetch(api("cards/" + encodeURIComponent(tagId)), {method:"DELETE", headers:{"x-hero-pin": PIN_DG || ""}}); return; }
     const all = lsAll(); delete all[tagId]; lsSave(all);
   },
+  /** Zmiana PIN-u karty. Treść karty i historia odczytów zostają na miejscu. */
+  async changePin(tagId, nowyDigest){
+    if(API){
+      const r = await fetch(api("cards/" + encodeURIComponent(tagId) + "/pin"), {method:"POST",
+        headers:{"content-type":"application/json", "x-hero-pin": PIN_DG || ""},
+        body: JSON.stringify({pinHash:nowyDigest})});
+      if(r.status === 204) return {ok:true};
+      const j = await r.json().catch(() => ({}));
+      return {ok:false, error: j.error || "Serwer odrzucił zmianę PIN-u (" + r.status + ")"};
+    }
+    const all = lsAll(), c = all[tagId];
+    if(!c) return {ok:false, error:"Nie ma karty o tym identyfikatorze"};
+    c.pinHash = nowyDigest;
+    lsSave(all);
+    return {ok:true};
+  },
   /** Unieważnienie zgubionej opaski. Nieodwracalne: adres przestaje oddawać kartę raz na zawsze. */
   async revoke(tagId){
     if(API){
@@ -1269,13 +1285,42 @@ async function renderTab(){
     + '<label class="f">Uwagi dla zespołu ratunkowego<textarea name="note" placeholder="np. trudny dostęp dożylny, niepełnosprawność, opieka nad dzieckiem">'+esc(p.note)+'</textarea></label>'
     + '<div class="row"><label class="check"><input type="checkbox" name="donor"'+(p.donor?" checked":"")+'> Zgoda na pobranie narządów</label>'
     +   '<label class="check"><input type="checkbox" name="dnr"'+(p.dnr?" checked":"")+'> Zgłoszone oświadczenie DNR</label></div>'
-    + '<div class="row"><button class="btn btn-primary" type="submit">Zapisz dane podstawowe</button></div></form>';
+    + '<div class="row"><button class="btn btn-primary" type="submit">Zapisz dane podstawowe</button></div></form>'
+    /* PIN chroni edycję karty, więc zmienia go pacjent, nie lekarz z dostępem do tej samej karty. */
+    + (ROLE === "pacjent"
+      ? '<details style="margin-top:1.2rem"><summary class="small muted" style="cursor:pointer">Zmiana PIN-u</summary>'
+        + '<p class="small muted" style="margin:.6rem 0">PIN otwiera kartę do edycji — jeśli ktoś go poznał, zmień go tutaj. Karta, historia odczytów i opaska zostają bez zmian, bo PIN-u nie ma w opasce.</p>'
+        + '<form id="fPin" class="stack" style="max-width:340px">'
+        +   '<label class="f">Obecny PIN<input type="password" name="stary" inputmode="numeric" required></label>'
+        +   '<label class="f">Nowy PIN<input type="password" name="nowy" inputmode="numeric" minlength="4" maxlength="6" required placeholder="4–6 cyfr"></label>'
+        +   '<label class="f">Powtórz nowy PIN<input type="password" name="nowy2" inputmode="numeric" required></label>'
+        +   '<button class="btn btn-primary btn-sm" type="submit">Zmień PIN</button>'
+        +   '<p id="pinErr" class="tiny" style="color:var(--crit)"></p>'
+        + '</form></details>'
+      : "");
     document.getElementById("fBasic").addEventListener("submit", async e => {
       e.preventDefault(); const f = e.target;
       CARD.person = { name:f.name.value.trim(), birthDate:f.birthDate.value, blood:f.blood.value, rh:f.rh.value,
         weightKg:f.weightKg.value.trim(), heightCm:f.heightCm.value.trim(), langs:f.langs.value.trim(),
         devices:f.devices.value.trim(), note:f.note.value.trim(), donor:f.donor.checked, dnr:f.dnr.checked };
       await persist(); toast("Zapisano"); renderEditor();
+    });
+
+    const formPin = document.getElementById("fPin");
+    if(formPin) formPin.addEventListener("submit", async ev => {
+      ev.preventDefault();
+      const f = ev.target;
+      if(f.nowy.value !== f.nowy2.value){ formErr("pinErr", "Nowe PIN-y się różnią."); return; }
+      const stary = await digest(CARD.tagId, f.stary.value);
+      if(PIN_DG && stary !== PIN_DG){ formErr("pinErr", "Obecny PIN się nie zgadza."); return; }
+      const nowy = await digest(CARD.tagId, f.nowy.value);
+      if(nowy === stary){ formErr("pinErr", "Nowy PIN jest taki sam jak stary."); return; }
+      const r = await store.changePin(CARD.tagId, nowy);
+      if(!r.ok){ formErr("pinErr", r.error); return; }
+      PIN_DG = nowy;
+      ses.set({tagId:CARD.tagId, role:ROLE, dg:PIN_DG});
+      toast("PIN zmieniony");
+      renderEditor();
     });
     return;
   }

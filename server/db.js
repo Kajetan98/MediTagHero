@@ -160,6 +160,19 @@ class CardStore {
     return { status: exists ? 200 : 201, card: this.fullCard(tagId) };
   }
 
+  /**
+   * Zmiana PIN-u bez usuwania karty. Skrót przysyła przeglądarka (`hero:<tag>:<pin>`), serwer
+   * przepuszcza go przez scrypt z nową solą. Historia odczytów i treść karty zostają nietknięte.
+   */
+  changePin(tagId, digest, nowyHash) {
+    if (!this.has(tagId)) return { status: 404, error: "Nie ma karty o tym identyfikatorze" };
+    if (!this.checkPin(tagId, digest)) return { status: 403, error: "Nieprawidłowy PIN karty" };
+    if (!nowyHash) return { status: 400, error: "Zmiana PIN-u wymaga pola pinHash" };
+    if (nowyHash === digest) return { status: 409, error: "Nowy PIN jest taki sam jak stary" };
+    this.db.prepare("UPDATE cards SET pin = ? WHERE tag_id = ?").run(hashSecret(nowyHash), tagId);
+    return { status: 204 };
+  }
+
   /** Czy opaska jest unieważniona. Odczyt ratunkowy pod tym adresem ma wtedy odpaść, nie oddać kartę. */
   revokedAt(tagId) {
     const row = this.db.prepare("SELECT revoked_at FROM cards WHERE tag_id = ?").get(tagId);
