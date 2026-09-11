@@ -7,7 +7,8 @@ Pacjent i lekarz prowadzą jedną kartę: alergie, przyjmowane leki, choroby prz
 wszczepy, kontakty alarmowe. Ratownik po zbliżeniu telefonu do opaski dostaje zestaw krytyczny
 bez logowania — także wtedy, gdy pacjent jest nieprzytomny. Każdy odczyt zostawia ślad w historii karty.
 
-Opaska nie przechowuje danych medycznych. Tag NFC zawiera wyłącznie adres karty.
+Opaska nie przechowuje danych medycznych. Tag NFC zawiera wyłącznie adres karty — ten adres
+zapisuje na opasce sama aplikacja, w zakładce „Opaska NFC" karty pacjenta.
 
 ## Uruchomienie
 
@@ -44,6 +45,40 @@ i podpis jest tylko etykietą.
 Kolejność w odczycie ratunkowym jest celowa: najpierw alergie i anafilaksja, potem leki
 (z wyróżnionymi antykoagulantami), choroby aktywne, wszczepy i uwagi, na końcu kontakt alarmowy.
 
+## Opaska NFC
+
+Opaska nosi jeden rekord NDEF typu URL: adres aplikacji z identyfikatorem karty w kotwicy, na
+przykład `https://hero.example/#/t/HERO-2481-KX`. Trasa siedzi w kotwicy, a nie w ścieżce, bo ten
+sam plik chodzi też poza serwerem HERO. Danych medycznych w opasce nie ma.
+
+Zapis robi sama przeglądarka, w karcie pacjenta, w zakładce „Opaska NFC"; zaraz po założeniu karty
+aplikacja otwiera tę zakładkę, bo karta bez opaski jest samym adresem. Obok zapisu są tam jeszcze
+dwie rzeczy: sprawdzenie, co w opasce już leży, i zabezpieczenie jej przed nadpisaniem
+(`makeReadOnly` — nieodwracalne).
+
+Web NFC działa dziś w Chrome na Androidzie, wyłącznie w bezpiecznym kontekście (HTTPS albo
+localhost) i po kliknięciu. Gdzie indziej — w tym na iOS — przyciski są wyłączone, a zostaje adres
+do skopiowania i zapisania dowolną aplikacją do NFC jako rekord typu URL. Ratownik do odczytu żadnej
+aplikacji nie potrzebuje: Android i iOS otwierają adres z opaski same.
+
+Po zbliżeniu opaski otwiera się jeden adres, a zakres zależy od tego, kto go otworzył:
+
+| Kto zbliżył | Co widzi |
+|---|---|
+| pacjent z otwartą sesją tej karty | swoja karta w edytorze, bez pytania o PIN |
+| przeglądarka, która otwierała tę kartę PIN-em pacjenta | pytanie o PIN, potem edytor |
+| zalogowane konto lekarza | pytanie o PIN pacjenta; otwarcie idzie do historii jako dostęp lekarza |
+| ktokolwiek inny | odczyt ratunkowy od razu, bez pytania o cokolwiek; odczyt idzie do historii |
+
+Rozpoznanie roli to podpowiedź z tej przeglądarki, nie uprawnienie — identyfikatory opasek, które
+otwarto PIN-em pacjenta, leżą w `localStorage` pod kluczem `hero.owners.v1`, a usunięcie karty je
+stamtąd kasuje. Zakres i tak otwiera dopiero PIN, a odczyt ratunkowy jest jawny dla każdego, kto zna
+identyfikator opaski — z podpowiedzi albo bez niej. Rolę można przełączyć ręcznie paskiem nad kartą.
+
+Bez serwera HERO karta leży w pamięci jednej przeglądarki. Opaska zaprowadzi pod ten sam adres każdy
+telefon, ale kartę znajdzie pod nim tylko ta jedna przeglądarka; opaska, która ma zadziałać
+u ratownika, wymaga serwera.
+
 ## Struktura
 
 ```
@@ -57,6 +92,7 @@ server/secrets.js scrypt na PIN-ach kart i hasłach lekarzy
 server/limit.js   licznik żądań w oknie czasu
 server/seed.js    przykładowa karta i konto lekarza
 test/api.test.js  testy API
+test/nfc.test.js  adres zapisywany w opasce (blok NFC wycięty z web/app.html)
 .github/workflows testy na każdy push i pull request (Node 22.13, 22 i 24)
 docs/             model danych i plan rozwoju
 ```
@@ -111,6 +147,9 @@ Stan na dziś to działający prototyp, nie system produkcyjny. Przed wdrożenie
   kontrolnej i nie odpytujemy rejestru Naczelnej Izby Lekarskiej, więc konto nie dowodzi uprawnień.
 - **Dostęp lekarza to nadal PIN pacjenta.** Konto dokłada tożsamość i podpis, nie zmienia sposobu
   wchodzenia do karty. Docelowo pacjent nadaje dostęp osobnym kodem, z terminem ważności.
+- **Zapis opaski działa tylko w Chrome na Androidzie.** Web NFC nie istnieje w Safari ani w żadnej
+  przeglądarce na iOS, więc pacjent z iPhone'em musi zapisać adres osobną aplikacją do NFC. Odczytu
+  to nie dotyczy — adres z opaski otwierają oba systemy.
 - **Sesje lekarzy nie wygasają.**
 - **Opis czytnika przy odczycie ratunkowym jest deklaracją.** Kontekst wpisu nadaje serwer, a przy
   dostępie lekarza opis bierze się z konta. Przy odczycie ratunkowym pole „kto odczytał" nadal

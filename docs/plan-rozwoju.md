@@ -39,6 +39,9 @@ chroniła cokolwiek przed zgadywaniem. Do produkcji:
 - przypisanie opaski do karty jako osobna encja (`tags`), bo jeden pacjent może mieć opaskę i kartę
   na telefonie, a opaskę wymienia się częściej niż kartę.
 
+Kształt samego adresu jest już rozstrzygnięty i zapisuje go aplikacja: rekord NDEF typu URL
+z trasą `#/t/<identyfikator>`. Do zrobienia zostaje treść identyfikatora, nie sposób jego zapisu.
+
 ## 4. Konta lekarzy
 
 Zrobione: konto z numerem PWZ i hasłem, logowanie tokenem sesji, podpis wpisu nadawany przez serwer
@@ -69,9 +72,10 @@ udokumentowania i ograniczenia zakresu jawnych danych do minimum.
 
 ## 6. Aplikacja mobilna
 
-Przeglądarka wystarczy do odczytu (Android i iOS otwierają adres z tagu NFC bez aplikacji).
-Aplikacja pacjenta ma sens dla: zapisu tagu przy aktywacji opaski, pracy offline, powiadomień
-o odczycie karty i skanowania opakowań leków.
+Przeglądarka wystarczy do odczytu (Android i iOS otwierają adres z tagu NFC bez aplikacji) i do
+zapisu opaski — ten robi już Web NFC w zakładce „Opaska NFC". Web NFC kończy się jednak na Chrome
+na Androidzie, więc aplikacja pacjenta zostaje potrzebna dla: zapisu opaski na iOS, pracy offline,
+powiadomień o odczycie karty i skanowania opakowań leków.
 
 ## 7. EPI
 
@@ -112,8 +116,9 @@ odczycie ratunkowym nikt nie sprawdzi u pacjenta.
 - zmiana PIN-u bez usuwania karty,
 - migracje schematu (dziś `CREATE TABLE IF NOT EXISTS` przy starcie),
 - wersjonowanie karty: kto i co zmienił, z możliwością cofnięcia,
-- testy interfejsu. Dziś pokryte jest samo API; `web/app.html` to ponad 800 linii logiki bez
-  testów, w tym `critical()`, która decyduje o zawartości odczytu ratunkowego,
+- testy interfejsu. Z `web/app.html` sprawdzony jest sam adres opaski (`test/nfc.test.js` wycina
+  blok `NFC:START … NFC:END` i uruchamia go bez przeglądarki); reszta logiki została bez testów,
+  w tym `critical()`, która decyduje o zawartości odczytu ratunkowego,
 - rozszerzenie CI poza `npm test`: dziś workflow uruchamia same testy API na trzech wersjach Node-a,
 - opis wdrożenia: obraz kontenera i konfiguracja reverse proxy zakładanego w README,
 - lista zależności Pythona dla `tools/logos.py` (skrypt wymaga Pillow).
