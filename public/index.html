@@ -366,10 +366,21 @@ function critical(card){
 
 const api = path => "api/" + path;
 const store = {
-  /* zestaw jawny — to samo, co widzi ratownik; bez PIN-u i bez historii */
+  /**
+   * Zestaw jawny — to samo, co widzi ratownik; bez PIN-u i bez historii. Unieważniona opaska oddaje
+   * `{revoked:true}`, nie kartę: ratownik ma zobaczyć, że opaska jest odcięta, a nie że nic nie ma.
+   */
   async get(tagId){
-    if(API){ const r = await fetch(api("cards/" + encodeURIComponent(tagId))); if(!r.ok) return null; return r.json(); }
-    return lsAll()[tagId] || null;
+    if(API){
+      const r = await fetch(api("cards/" + encodeURIComponent(tagId)));
+      if(r.status === 410){ const j = await r.json().catch(() => ({})); return {tagId, revoked:true, revokedAt:j.revokedAt || null}; }
+      if(!r.ok) return null;
+      return r.json();
+    }
+    const c = lsAll()[tagId];
+    if(!c) return null;
+    if(c.revokedAt) return {tagId, revoked:true, revokedAt:c.revokedAt};
+    return c;
   },
   async list(){
     if(API){ const r = await fetch(api("cards")); if(!r.ok) return []; return r.json(); }
@@ -404,6 +415,46 @@ const store = {
   async remove(tagId){
     if(API){ await fetch(api("cards/" + encodeURIComponent(tagId)), {method:"DELETE", headers:{"x-hero-pin": PIN_DG || ""}}); return; }
     const all = lsAll(); delete all[tagId]; lsSave(all);
+  },
+  /** Unieważnienie zgubionej opaski. Nieodwracalne: adres przestaje oddawać kartę raz na zawsze. */
+  async revoke(tagId){
+    if(API){
+      const r = await fetch(api("cards/" + encodeURIComponent(tagId) + "/revoke"), {method:"POST", headers:{"x-hero-pin": PIN_DG || ""}});
+      const j = await r.json().catch(() => ({}));
+      if(!r.ok) return {ok:false, error: j.error || "Serwer odrzucił unieważnienie (" + r.status + ")"};
+      return {ok:true, revokedAt: j.revokedAt};
+    }
+    const all = lsAll(), c = all[tagId];
+    if(!c) return {ok:false, error:"Nie ma karty o tym identyfikatorze"};
+    c.revokedAt = c.revokedAt || nowISO();
+    lsSave(all);
+    return {ok:true, revokedAt: c.revokedAt};
+  },
+  /**
+   * Przeniesienie karty na nową opaskę. Skrót PIN-u wiąże się z identyfikatorem opaski, więc nowy
+   * adres wymaga skrótu przeliczonego dla niego — dlatego przeniesienie pyta o PIN jeszcze raz.
+   */
+  async move(tagId, nowy, dgNowy){
+    if(API){
+      const r = await fetch(api("cards/" + encodeURIComponent(tagId) + "/move"), {method:"POST",
+        headers:{"content-type":"application/json", "x-hero-pin": PIN_DG || ""},
+        body: JSON.stringify({tagId:nowy, pinHash:dgNowy})});
+      const j = await r.json().catch(() => ({}));
+      if(!r.ok) return {ok:false, error: j.error || "Serwer odrzucił przeniesienie (" + r.status + ")"};
+      return {ok:true, card:j};
+    }
+    const all = lsAll(), c = all[tagId];
+    if(!c) return {ok:false, error:"Nie ma karty o tym identyfikatorze"};
+    if(all[nowy]) return {ok:false, error:"Karta o tym identyfikatorze już istnieje"};
+    const kopia = JSON.parse(JSON.stringify(c));
+    kopia.tagId = nowy; kopia.pinHash = dgNowy; kopia.reads = []; kopia.demo = false;
+    delete kopia.revokedAt;
+    all[nowy] = kopia;
+    /* Pod starym adresem zostaje nagrobek: historia odczytów tamtej opaski, bez treści karty. */
+    c.revokedAt = nowISO();
+    c.person = {}; c.allergies = []; c.meds = []; c.conditions = []; c.contacts = [];
+    lsSave(all);
+    return {ok:true, card:kopia};
   },
   async logRead(tagId, by, ctx){
     const payload = {by: by || "nieznany czytnik", ctx: ctx || "odczyt ratunkowy"};
@@ -800,6 +851,15 @@ function handoverText(card){
   return L.join("\n");
 }
 
+/** Ratownik ze starą opaską w ręku musi wiedzieć, że trafił na odciętą, a nie na zepsuty serwis. */
+function revokedHTML(tagId, revokedAt){
+  return '<div class="notice crit"><span><b>Opaska unieważniona</b>'
+  + (revokedAt ? ' ' + esc(fmtDT(revokedAt)) : "")
+  + '. Pacjent zgłosił utratę tej opaski, więc pod jej adresem nie ma karty. Jeśli pacjent jest przytomny, '
+  + 'poproś o nową opaskę; jeśli nie — szukaj drugiej opaski albo dokumentów. Identyfikator: '
+  + '<span class="tagid">' + esc(tagId) + '</span></span></div>';
+}
+
 function wireHandover(card){
   const b = document.getElementById("copyHand");
   if(!b) return;
@@ -839,7 +899,8 @@ async function renderScan(params){
     const tag = form.tag.value.trim().toUpperCase();
     const by = form.by.value.trim() || "czytnik nieopisany";
     const card = await store.get(tag);
-    if(!card){ out.innerHTML = '<div class="notice crit"><span>Nie znaleziono karty <b class="mono">'+esc(tag)+'</b>. Sprawdź identyfikator albo załóż kartę w zakładce „Moja karta”.</span></div>'; return; }
+    if(!card){ out.innerHTML = '<div class="notice crit"><span>Nie znaleziono karty <b class="tagid">'+esc(tag)+'</b>. Sprawdź identyfikator albo załóż kartę w zakładce „Moja karta”.</span></div>'; return; }
+    if(card.revoked){ out.innerHTML = revokedHTML(tag, card.revokedAt); return; }
     const entry = await store.logRead(tag, by, "odczyt ratunkowy");
     out.innerHTML = readoutHTML(critical(card), entry)
       + '<div class="row" style="margin-top:.8rem"><button class="btn btn-sm" id="copyHand">Skopiuj podsumowanie do przekazania</button></div>';
@@ -862,7 +923,8 @@ function renderEditor(){
   view.innerHTML = '<div class="stack">'
   + '<div class="panel"><div class="panel-h">'
   +   '<div><p class="eyebrow">'+(isDoc ? "Rola: lekarz — " + esc(DOCTOR ? DOCTOR.name + ", PWZ " + DOCTOR.pwz : "konto nieznane") : "Rola: pacjent")+'</p>'
-  +   '<h3>'+esc(p.name || "Karta bez nazwiska")+' <span class="tagid tiny muted">'+esc(CARD.tagId)+'</span></h3>'
+  +   '<h3>'+esc(p.name || "Karta bez nazwiska")+' <span class="tagid tiny muted">'+esc(CARD.tagId)+'</span>'
+  +   (CARD.revokedAt ? ' <span class="tag tag-crit">opaska unieważniona</span>' : "")+'</h3>'
   +   '<p class="tiny muted">Ostatnia zmiana: '+esc(fmtDT(CARD.updatedAt))+' · '+esc(CARD.updatedBy||"pacjent")+'</p></div>'
   +   '<div class="row" style="margin-left:auto">'
   +     '<a class="btn btn-sm" href="#/odczyt?tag='+encodeURIComponent(CARD.tagId)+'">Podgląd odczytu</a>'
@@ -928,11 +990,16 @@ async function renderTab(){
   if(TAB === "opaska"){
     const base = appBase(location);
     const url = tagUrl(CARD.tagId, base);
+    const martwa = !!CARD.revokedAt;
+    const mozeZapisac = nfcReady() && !martwa;
     b.innerHTML = '<div class="stack">'
+    + (martwa
+        ? '<div class="notice crit"><span>Ta opaska jest unieważniona od '+esc(fmtDT(CARD.revokedAt))+'. Pod jej adresem nikt nie dostanie karty — ani ratownik, ani ty. Karta ma się znów odczytywać? Przenieś ją na nową opaskę.</span></div>'
+        : "")
     + '<p class="small muted">W opasce zostaje sam adres tej karty, bez danych medycznych. Kto zbliży do niej telefon, otworzy ten adres: pacjent i lekarz trafią na pytanie o PIN, każdy inny na odczyt ratunkowy.</p>'
     + '<label class="f">Adres zapisywany w opasce<input class="mono" id="nfcUrl" readonly value="'+esc(url)+'"></label>'
     + '<div class="row">'
-    +   '<button class="btn btn-primary" id="nfcWrite"'+(nfcReady()?"":" disabled")+'>Zapisz kartę na opasce</button>'
+    +   '<button class="btn btn-primary" id="nfcWrite"'+(mozeZapisac?"":" disabled")+'>Zapisz kartę na opasce</button>'
     +   '<button class="btn" id="nfcCheck"'+(nfcReady()?"":" disabled")+'>Sprawdź, co jest na opasce</button>'
     +   '<button class="btn btn-sm" id="nfcCopy">Skopiuj adres</button>'
     + '</div>'
@@ -944,6 +1011,20 @@ async function renderTab(){
     +   '<p class="small muted" style="margin:.6rem 0">Opaskę można zablokować przed nadpisaniem. Operacji nie da się cofnąć: zablokowanej opaski nie przypiszesz już do innej karty.</p>'
     +   '<button class="btn btn-sm" id="nfcLock"'+(nfcReady()?"":" disabled")+'>Zabezpiecz opaskę przed zapisem</button>'
     + '</details>'
+    /* Unieważnienie i przeniesienie zmieniają los całej karty, więc zostają przy pacjencie — tak samo
+       jak usunięcie karty, którego lekarz też nie ma. */
+    + (ROLE === "pacjent"
+      ? '<details'+(martwa?" open":"")+'><summary class="small muted" style="cursor:pointer">Zgubiona opaska</summary>'
+        + '<p class="small muted" style="margin:.6rem 0">Sam identyfikator z opaski otwiera odczyt ratunkowy, więc zgubiona opaska zostaje kluczem do zestawu krytycznego. Unieważnienie odcina ten adres na zawsze: karta zostaje, ale pod starym identyfikatorem nikt jej nie odczyta. Przeniesienie robi to samo i od razu daje karcie nową opaskę — historia odczytów zostaje przy starej.</p>'
+        + (martwa ? "" : '<div class="row" style="margin-bottom:1rem"><button class="btn btn-crit btn-sm" id="revoke">Unieważnij tę opaskę</button></div>')
+        + '<form id="fMove" class="stack" style="max-width:340px">'
+        +   '<label class="f">PIN karty<input type="password" name="pin" inputmode="numeric" required placeholder="ten sam PIN"></label>'
+        +   '<button class="btn btn-primary btn-sm" type="submit">Przenieś kartę na nową opaskę</button>'
+        +   '<p class="tiny muted">Nowy identyfikator wymaga skrótu PIN-u przeliczonego dla niego, dlatego pytamy o PIN jeszcze raz. Sam PIN się nie zmienia.</p>'
+        +   '<p id="moveErr" class="tiny" style="color:var(--crit)"></p>'
+        + '</form>'
+        + '</details>'
+      : "")
     + '</div>';
 
     const out = document.getElementById("nfcOut");
@@ -952,7 +1033,7 @@ async function renderTab(){
       try { await navigator.clipboard.writeText(url); toast("Adres skopiowany"); }
       catch(e){ document.getElementById("nfcUrl").select(); toast("Skopiuj zaznaczony adres"); }
     });
-    if(nfcReady()){
+    if(mozeZapisac){
       document.getElementById("nfcWrite").addEventListener("click", async () => {
         info("", "Przyłóż opaskę do telefonu i przytrzymaj chwilę…");
         const r = await nfcWrite(url);
@@ -960,6 +1041,8 @@ async function renderTab(){
         info("ok", "Opaska zapisana. Od teraz zbliżenie telefonu otwiera kartę " + CARD.tagId + ".");
         toast("Opaska zapisana");
       });
+    }
+    if(nfcReady()){
       document.getElementById("nfcCheck").addEventListener("click", async () => {
         info("", "Przyłóż opaskę do telefonu…");
         const r = await nfcScan(znaleziony => {
@@ -977,11 +1060,48 @@ async function renderTab(){
         info(r.ok ? "ok" : "crit", r.ok ? "Opaska zabezpieczona — zapisanego adresu nie da się już zmienić." : r.error);
       });
     }
+
+    const przyciskRevoke = document.getElementById("revoke");
+    if(przyciskRevoke) przyciskRevoke.addEventListener("click", async () => {
+      if(!confirm("Unieważnić opaskę " + CARD.tagId + "? Pod tym adresem nikt już nie odczyta karty, a operacji nie da się cofnąć.")) return;
+      const r = await store.revoke(CARD.tagId);
+      if(!r.ok){ info("crit", r.error); return; }
+      CARD.revokedAt = r.revokedAt;
+      toast("Opaska unieważniona");
+      renderEditor();
+    });
+
+    const formMove = document.getElementById("fMove");
+    if(formMove) formMove.addEventListener("submit", async ev => {
+      ev.preventDefault();
+      const pin = ev.target.pin.value;
+      const stary = CARD.tagId;
+      /* Skrót liczymy z PIN-u na miejscu: bez serwera nikt tego nie sprawdzi, a karty nie wolno
+         zostawić w połowie drogi. */
+      if(PIN_DG && await digest(stary, pin) !== PIN_DG){ formErr("moveErr", "Nieprawidłowy PIN."); return; }
+      const nowy = genTag();
+      const dgNowy = await digest(nowy, pin);
+      const r = await store.move(stary, nowy, dgNowy);
+      if(!r.ok){ formErr("moveErr", r.error); return; }
+      PIN_DG = dgNowy;
+      CARD = r.card;
+      ses.set({tagId:nowy, role:ROLE, dg:PIN_DG});
+      forgetOwner(stary);
+      markOwner(nowy, CARD.person && CARD.person.name);
+      toast("Karta przeniesiona na nową opaskę");
+      renderEditor();
+    });
     return;
   }
 
   if(TAB === "historia"){
-    if(PIN_DG){ const fresh = await store.openWithDigest(CARD.tagId, PIN_DG); if(fresh.ok) CARD.reads = fresh.card.reads || []; }
+    if(PIN_DG){
+      const tagId = CARD.tagId;
+      const fresh = await store.openWithDigest(tagId, PIN_DG);
+      /* Kartę można zamknąć w trakcie tego zapytania — wtedy nie ma już czego rysować. */
+      if(!CARD || CARD.tagId !== tagId || !document.getElementById("tabBody")) return;
+      if(fresh.ok) CARD.reads = fresh.card.reads || [];
+    }
     const reads = CARD.reads || [];
     b.innerHTML = '<div class="row" style="justify-content:space-between;margin-bottom:.8rem"><p class="small muted" style="flex:1 1 260px">Każde otwarcie karty w trybie ratunkowym zostawia ślad. Historia jest widoczna dla pacjenta i lekarza z dostępem.</p>'
     + '<button class="btn btn-sm" id="reloadReads">Odśwież</button></div>'
@@ -1285,6 +1405,11 @@ async function tagReadout(tagId){
     view.innerHTML = '<div class="stack" style="max-width:760px;margin-inline:auto">' + roleBar(tagId, "ratownik")
     + '<div class="notice crit"><span>Opaska <b class="tagid">'+esc(tagId)+'</b> wskazuje kartę, której nie ma '
     + (API ? "w bazie tego serwera." : "w pamięci tej przeglądarki.") + ' Karta mogła zostać usunięta.</span></div></div>';
+    return;
+  }
+  if(card.revoked){
+    view.innerHTML = '<div class="stack" style="max-width:760px;margin-inline:auto">' + roleBar(tagId, "ratownik")
+    + revokedHTML(tagId, card.revokedAt) + '</div>';
     return;
   }
   const entry = await store.logRead(tagId, "odczyt po zbliżeniu opaski", "odczyt ratunkowy");

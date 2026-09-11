@@ -30,17 +30,23 @@ Sam limit trzeba przenieść na wspólny magazyn, gdy serwer przestanie być jed
 
 ## 3. Identyfikator opaski
 
-Dziś identyfikator ma postać `HERO-2481-KX` — czytelną, ale zbyt krótką i zbyt regularną, żeby
-chroniła cokolwiek przed zgadywaniem. Do produkcji:
+Zrobione: identyfikator nowej karty to 128 bitów losowości w base32 Crockforda (`genTag`), adres
+zapisywany w opasce ma ustalony kształt (rekord NDEF typu URL, trasa `#/t/<identyfikator>`),
+a zgubioną opaskę da się unieważnić — stary adres oddaje wtedy 410 z datą unieważnienia — albo
+przenieść kartę na nową opaskę jednym ruchem. Karty ze starymi, krótkimi identyfikatorami działają
+dalej.
 
-- identyfikator losowy, co najmniej 128 bitów, kodowany base32 w adresie zapisanym w tagu NFC,
-- osobny, krótki numer serwisowy nadrukowany na opasce (do zgłoszenia zgubienia, nie do odczytu),
-- unieważnianie: pacjent zgłasza utratę, stary adres zwraca informację o unieważnieniu zamiast karty,
-- przypisanie opaski do karty jako osobna encja (`tags`), bo jeden pacjent może mieć opaskę i kartę
-  na telefonie, a opaskę wymienia się częściej niż kartę.
+Zostaje:
 
-Kształt samego adresu jest już rozstrzygnięty i zapisuje go aplikacja: rekord NDEF typu URL
-z trasą `#/t/<identyfikator>`. Do zrobienia zostaje treść identyfikatora, nie sposób jego zapisu.
+- **osobny, krótki numer serwisowy** nadrukowany na opasce, do zgłoszenia zgubienia, nie do odczytu.
+  Dziś unieważnia się opaskę z karty, więc pacjent musi mieć dostęp do karty; numer serwisowy
+  przydaje się, gdy zgłasza utratę ktoś inny albo gdy zgłoszenie idzie poza aplikację.
+- **wymuszenie długości po stronie serwera** — dziś serwer bierze każdy identyfikator pasujący do
+  `TAG` (do 32 znaków), bo inaczej odciąłby karty założone wcześniej i kartę przykładową z seeda.
+- **przypisanie opaski do karty jako osobna encja** (`tags`), bo jeden pacjent może mieć opaskę i kartę
+  na telefonie, a opaskę wymienia się częściej niż kartę. Dziś przeniesienie robi kopię karty pod nowym
+  identyfikatorem i zostawia nagrobek — działa, ale historia odczytów zostaje przy starej opasce,
+  a nie przy pacjencie.
 
 ## 4. Konta lekarzy
 

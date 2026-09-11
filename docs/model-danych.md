@@ -15,7 +15,9 @@ cards (
   demo       INTEGER,            -- 1 dla kart przykładowych; tylko te wychodzą w GET /api/cards
                                  -- ustawia je wyłącznie zapis z `trusted`, nie żądanie HTTP
   updated_at TEXT,               -- ISO 8601
-  updated_by TEXT                -- 'pacjent' | 'lekarz' | 'przykład'; nadaje serwer z konta zapisu
+  updated_by TEXT,               -- 'pacjent' | 'lekarz' | 'przykład'; nadaje serwer z konta zapisu
+  revoked_at TEXT                -- NULL dla opaski czynnej; data unieważnienia dla odciętej
+                                 -- (kolumna dochodzi migracją do baz założonych wcześniej)
 )
 
 reads (
@@ -152,6 +154,17 @@ każdy identyfikator pasujący do `TAG` (do 32 znaków), bo karty założone wcz
 z `npm run seed` mają identyfikatory krótkie. Nikt takiego identyfikatora nie wpisze z pamięci, więc
 ekran pacjenta podaje listę opasek znanych tej przeglądarce, a pełny identyfikator zostaje w opasce
 i w kodzie QR.
+
+**Unieważniona opaska zostaje w bazie jako nagrobek.** `revoked_at` nie usuwa wiersza: stary adres ma
+odpowiadać „opaska unieważniona" (410), a nie „nie ma takiej karty" (404), bo to dwie różne informacje
+dla ratownika, który właśnie zbliżył telefon. Unieważnienie zostawia treść karty — pacjent otwiera ją
+dalej PIN-em i może przenieść na nową opaskę. Przeniesienie (`move`) zakłada wiersz pod nowym
+identyfikatorem z tą samą treścią i tym samym PIN-em, a stary czyści z treści i nazwiska, zostawiając
+mu historię odczytów: historia dotyczy opaski, nie pacjenta, więc nowa startuje pusta.
+
+Nowy adres wymaga skrótu PIN-u przeliczonego dla niego, bo skrót wiąże się z identyfikatorem opaski
+(`hero:<tag>:<pin>`). Dlatego przeniesienie pyta pacjenta o PIN jeszcze raz, choć sesja jest otwarta:
+przeglądarka trzyma sam skrót, nie PIN.
 
 **Identyfikatory wpisów nadaje przeglądarka** (`Math.random`), bo wpisy nie wychodzą poza jedną kartę.
 Identyfikatory odczytów nadaje serwer (`randomUUID`), bo są dowodem dostępu — poza trybem bez

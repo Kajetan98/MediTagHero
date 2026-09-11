@@ -13,8 +13,11 @@ const digest = (tag, pin) => createHash("sha256").update(`hero:${tag}:${pin}`).d
 const PIN = digest(TAG, "4321");
 
 let server, store, base;
-const call = (path, opts = {}) => fetch(base + path, opts);
-const json = async (path, opts) => { const r = await call(path, opts); return { status: r.status, body: r.status === 204 ? null : await r.json() }; };
+/* Drugi serwer na tej samej bazie. Test zalewania historii zużywa limit odczytów na całą minutę,
+   więc to, co trzeba sprawdzić po tamtym teście, idzie przez serwer z nietkniętymi licznikami. */
+let swiezy, baseSwiezy;
+const call = (path, opts = {}, adres = base) => fetch(adres + path, opts);
+const json = async (path, opts, adres) => { const r = await call(path, opts, adres); return { status: r.status, body: r.status === 204 ? null : await r.json() }; };
 const session = (tag, dg) => json(`/api/cards/${tag}/session`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ digest: dg }) });
 const put = (path, body, pin, doctor) => json(path, {
   method: "PUT",
@@ -34,10 +37,13 @@ before(async () => {
   server = createServer(store, rateLimiter({ limit: 12, windowMs: 60_000 }), rateLimiter({ limit: 5, windowMs: 60_000 }));
   await new Promise(r => server.listen(0, r));
   base = `http://127.0.0.1:${server.address().port}`;
+  swiezy = createServer(store, rateLimiter({ limit: 40, windowMs: 60_000 }), rateLimiter({ limit: 20, windowMs: 60_000 }));
+  await new Promise(r => swiezy.listen(0, r));
+  baseSwiezy = `http://127.0.0.1:${swiezy.address().port}`;
   await post("/api/doctors", LEKARZ);
   TOKEN = (await post("/api/doctors/session", { pwz: LEKARZ.pwz, password: LEKARZ.password })).body.token;
 });
-after(() => server.close());
+after(() => { server.close(); swiezy.close(); });
 
 const newCard = () => ({
   pinHash: PIN,
@@ -276,4 +282,78 @@ test("TLS bierze się ze ścieżek w środowisku albo nie bierze wcale", () => {
 
   assert.throws(() => tlsFromEnv({ HERO_TLS_KEY: join(dir, "nie-ma.pem"), HERO_TLS_CERT: join(dir, "cert.pem") }),
     /certyfikat/i, "brakujący plik zatrzymuje start z czytelnym błędem");
+});
+
+/* Poniższe idzie przez `baseSwiezy`: unieważnienie trzeba sprawdzić także na ścieżce odczytu,
+   a limit odczytów na pierwszym serwerze jest już zużyty. */
+const J = (path, opts) => json(path, opts, baseSwiezy);
+const jsonBody = (metoda, body, naglowki = {}) => ({
+  method: metoda, headers: { "content-type": "application/json", ...naglowki }, body: JSON.stringify(body),
+});
+
+test("unieważniona opaska nie oddaje karty pod starym adresem", async () => {
+  const tag = "HERO-6100-KA";
+  const pin = digest(tag, "4321");
+  assert.equal((await J(`/api/cards/${tag}`, jsonBody("PUT", { ...newCard(), pinHash: pin }))).status, 201);
+  assert.equal((await J(`/api/cards/${tag}`)).status, 200);
+  assert.equal((await J(`/api/cards/${tag}/reads`, jsonBody("POST", { by: "ZRM P-1" }))).status, 201);
+
+  assert.equal((await J(`/api/cards/${tag}/revoke`, { method: "POST" })).status, 403, "unieważnia tylko właściciel PIN-u");
+
+  const out = await J(`/api/cards/${tag}/revoke`, { method: "POST", headers: { "x-hero-pin": pin } });
+  assert.equal(out.status, 200);
+  assert.match(out.body.revokedAt, /^\d{4}-\d{2}-\d{2}T/);
+
+  const jawny = await J(`/api/cards/${tag}`);
+  assert.equal(jawny.status, 410, "stary adres mówi, że opaska jest odcięta, a nie że karty nie ma");
+  assert.equal(jawny.body.revokedAt, out.body.revokedAt);
+
+  const slad = await J(`/api/cards/${tag}/reads`, jsonBody("POST", { by: "ZRM P-2" }));
+  assert.equal(slad.status, 410, "nie ma czego pokazać, więc nie ma czego zapisać w historii");
+
+  const sesja = await J(`/api/cards/${tag}/session`, jsonBody("POST", { digest: pin }));
+  assert.equal(sesja.status, 200, "pacjent otwiera kartę dalej, bo PIN-u nikt nie zgubił");
+  assert.equal(sesja.body.revokedAt, out.body.revokedAt);
+  assert.equal(sesja.body.person.name, "Jan Kowalski", "treść karty zostaje");
+  assert.equal(sesja.body.reads.length, 1, "historia odczytów tamtej opaski zostaje");
+
+  const drugi = await J(`/api/cards/${tag}/revoke`, { method: "POST", headers: { "x-hero-pin": pin } });
+  assert.equal(drugi.body.revokedAt, out.body.revokedAt, "drugie unieważnienie nie przesuwa daty");
+});
+
+test("kartę przenosi się na nową opaskę razem z treścią", async () => {
+  const stary = "HERO-6200-KB", nowy = "HERO-6300-KC";
+  const pinStary = digest(stary, "4321"), pinNowy = digest(nowy, "4321");
+  assert.equal((await J(`/api/cards/${stary}`, jsonBody("PUT", { ...newCard(), pinHash: pinStary }))).status, 201);
+  assert.equal((await J(`/api/cards/${stary}/reads`, jsonBody("POST", { by: "ZRM P-3" }))).status, 201);
+
+  const ruch = (body, pin) => J(`/api/cards/${stary}/move`, jsonBody("POST", body, pin ? { "x-hero-pin": pin } : {}));
+
+  assert.equal((await ruch({ tagId: nowy, pinHash: pinNowy }, digest(stary, "0000"))).status, 403, "bez PIN-u nie ma przenoszenia");
+  assert.equal((await ruch({ tagId: nowy }, pinStary)).status, 400, "nowy adres wymaga skrótu PIN-u przeliczonego dla niego");
+  assert.equal((await ruch({ tagId: "nie ma takiego", pinHash: pinNowy }, pinStary)).status, 400);
+  assert.equal((await ruch({ tagId: stary, pinHash: pinNowy }, pinStary)).status, 409, "w to samo miejsce nie ma po co");
+
+  const out = await ruch({ tagId: nowy, pinHash: pinNowy }, pinStary);
+  assert.equal(out.status, 201);
+  assert.equal(out.body.tagId, nowy);
+  assert.equal(out.body.person.name, "Jan Kowalski");
+  assert.equal(out.body.allergies[0].allergen, "Penicylina", "wpisy przechodzą w całości");
+  assert.equal(out.body.reads.length, 0, "nowa opaska startuje z pustą historią");
+
+  assert.equal((await J(`/api/cards/${stary}`)).status, 410, "stara opaska odcięta");
+  assert.equal((await J(`/api/cards/${nowy}`)).status, 200, "nowa działa dla ratownika");
+
+  assert.equal((await J(`/api/cards/${nowy}/session`, jsonBody("POST", { digest: pinNowy }))).status, 200,
+    "ten sam PIN, skrót przeliczony dla nowego adresu");
+  assert.equal((await J(`/api/cards/${nowy}/session`, jsonBody("POST", { digest: pinStary }))).status, 403,
+    "stary skrót do nowego adresu nie pasuje");
+
+  const nagrobek = await J(`/api/cards/${stary}/session`, jsonBody("POST", { digest: pinStary }));
+  assert.equal(nagrobek.status, 200);
+  assert.deepEqual(nagrobek.body.person, {}, "pod starym adresem nie zostaje treść karty");
+  assert.equal(nagrobek.body.reads.length, 1, "historia odczytów zostaje przy tamtej opasce");
+
+  assert.equal((await ruch({ tagId: "HERO-6400-KD", pinHash: digest("HERO-6400-KD", "4321") }, pinNowy)).status, 403,
+    "skrótem nowej opaski nie przeniesie się starej");
 });

@@ -46,6 +46,8 @@ export function tlsFromEnv(env = process.env) {
   }
 }
 
+const str = v => (typeof v === "string" ? v : v == null ? "" : String(v));
+
 const send = (res, status, body, headers = {}) => {
   const payload = body === undefined ? "" : JSON.stringify(body);
   res.writeHead(status, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store", ...headers });
@@ -130,7 +132,7 @@ export function createServer(store = openDatabase(),
         return kto ? send(res, 200, kto) : fail(res, 403, "Nieznana albo wygasła sesja lekarza");
       }
 
-      const m = path.match(/^\/api\/cards\/([^/]+)(\/session|\/reads)?$/);
+      const m = path.match(/^\/api\/cards\/([^/]+)(\/session|\/reads|\/revoke|\/move)?$/);
       if (!m) return fail(res, 404, "Nieznany zasób");
 
       const tagId = m[1].toUpperCase();
@@ -154,10 +156,31 @@ export function createServer(store = openDatabase(),
         return send(res, 200, store.cards.fullCard(tagId));
       }
 
+      /* Unieważnienie i przeniesienie idą na PIN-ie karty, więc obejmuje je ten sam licznik prób. */
+      if (sub === "/revoke") {
+        if (req.method !== "POST") return fail(res, 405, "Nieobsługiwana metoda");
+        if (pins.blocked(pinKey)) return fail(res, 429, "Za dużo prób PIN-u do tej karty");
+        const out = afterPin(store.cards.revoke(tagId, req.headers["x-hero-pin"]));
+        return out.error ? fail(res, out.status, out.error) : send(res, 200, { revokedAt: out.revokedAt });
+      }
+      if (sub === "/move") {
+        if (req.method !== "POST") return fail(res, 405, "Nieobsługiwana metoda");
+        if (pins.blocked(pinKey)) return fail(res, 429, "Za dużo prób PIN-u do tej karty");
+        const body = await readJson(req);
+        const nowy = str(body.tagId).toUpperCase();
+        if (!TAG.test(nowy)) return fail(res, 400, "Nieprawidłowy identyfikator nowej opaski");
+        const out = afterPin(store.cards.move(tagId, req.headers["x-hero-pin"], nowy, body.pinHash));
+        return out.error ? fail(res, out.status, out.error) : send(res, out.status, out.card);
+      }
+
       if (sub === "/reads") {
         if (req.method !== "POST") return fail(res, 405, "Nieobsługiwana metoda");
-        /* Adres jest tym, co widzi proces; za reverse proxy trzeba go tam ograniczyć. */
+        /* Adres jest tym, co widzi proces; za reverse proxy trzeba go tam ograniczyć. Limit idzie
+           przed sprawdzeniem unieważnienia, żeby stan opaski nie dał się wypytywać bez ograniczeń. */
         if (!reads.allow(req.socket.remoteAddress || "?")) return fail(res, 429, "Za dużo odczytów z tego adresu");
+        /* Unieważniona opaska nie ma czego pokazać, więc nie ma też czego zapisać w historii. */
+        const uniewazniona = store.cards.revokedAt(tagId);
+        if (uniewazniona) return send(res, 410, { error: "Opaska unieważniona", revokedAt: uniewazniona });
         const body = await readJson(req);
         /* Dostęp lekarza opisuje jego konto, nie pole z formularza — i tylko konto może go zapisać. */
         const kto = doctor();
@@ -170,7 +193,11 @@ export function createServer(store = openDatabase(),
 
       if (req.method === "GET") {
         const card = store.cards.publicCard(tagId);
-        return card ? send(res, 200, card) : fail(res, 404, "Nie ma karty o tym identyfikatorze");
+        if (!card) return fail(res, 404, "Nie ma karty o tym identyfikatorze");
+        /* Stary adres mówi, że opaska jest odcięta. Ratownik ma wiedzieć, że trafił na unieważnioną
+           opaskę, a nie na zepsuty serwis — dlatego 410, nie 404. */
+        if (card.revokedAt) return send(res, 410, { error: "Opaska unieważniona", revokedAt: card.revokedAt });
+        return send(res, 200, card);
       }
       if (req.method === "PUT") {
         if (pins.blocked(pinKey)) return fail(res, 429, "Za dużo prób PIN-u do tej karty");

@@ -98,6 +98,22 @@ otwarto PIN-em pacjenta, leżą w `localStorage` pod kluczem `hero.owners.v1`, a
 stamtąd kasuje. Zakres i tak otwiera dopiero PIN, a odczyt ratunkowy jest jawny dla każdego, kto zna
 identyfikator opaski — z podpowiedzi albo bez niej. Rolę można przełączyć ręcznie paskiem nad kartą.
 
+### Zgubiona opaska
+
+Sam identyfikator z opaski otwiera odczyt ratunkowy, więc opaska zgubiona jest kluczem do zestawu
+krytycznego dopóty, dopóki pacjent jej nie odetnie. W zakładce „Opaska NFC" są na to dwie drogi:
+
+- **unieważnienie** — adres przestaje oddawać kartę: `GET /api/cards/:tag` odpowiada 410, a nie 404,
+  bo ratownik ze starą opaską w ręku ma wiedzieć, że trafił na odciętą, a nie na zepsuty serwis.
+  Treść karty zostaje, pacjent otwiera ją dalej PIN-em. Operacji nie da się cofnąć;
+- **przeniesienie na nową opaskę** — to samo, plus kopia karty pod nowym identyfikatorem. Pod starym
+  zostaje nagrobek: historia odczytów tamtej opaski, bez treści karty. Nowa opaska startuje z pustą
+  historią, bo historia dotyczy opaski, nie pacjenta.
+
+Przeniesienie pyta o PIN jeszcze raz, mimo otwartej sesji. Skrót PIN-u wiąże się z identyfikatorem
+opaski (`hero:<tag>:<pin>`), więc nowy adres wymaga skrótu przeliczonego dla niego, a przeglądarka
+trzyma sam skrót, nie PIN. Sam PIN się nie zmienia.
+
 Bez serwera HERO karta leży w pamięci jednej przeglądarki. Opaska zaprowadzi pod ten sam adres każdy
 telefon, ale kartę znajdzie pod nim tylko ta jedna przeglądarka; opaska, która ma zadziałać
 u ratownika, wymaga serwera.
@@ -128,11 +144,13 @@ docs/             model danych i plan rozwoju
 |---|---|---|---|
 | GET | `/api/health` | — | stan usługi i liczba kart w bazie |
 | GET | `/api/cards` | — | lista kart przykładowych (identyfikator, nazwisko, znacznik demo, data zmiany) |
-| GET | `/api/cards/:tag` | — | treść karty bez historii odczytów i bez skrótu PIN-u |
+| GET | `/api/cards/:tag` | — | treść karty bez historii odczytów i bez skrótu PIN-u; unieważniona opaska oddaje 410 |
 | POST | `/api/cards/:tag/session` | `{digest}` | pełna karta z historią odczytów |
 | PUT | `/api/cards/:tag` | nagłówek `x-hero-pin` | zapis karty; gdy karty nie ma w bazie, tworzy ją na podstawie `pinHash` (bez znacznika demo) |
 | DELETE | `/api/cards/:tag` | nagłówek `x-hero-pin` | usuwa kartę i jej historię |
 | POST | `/api/cards/:tag/reads` | — dla odczytu ratunkowego, `x-hero-doctor` dla dostępu lekarza | zapisuje odczyt; czas, identyfikator i kontekst nadaje serwer, przy koncie lekarza także opis czytnika |
+| POST | `/api/cards/:tag/revoke` | nagłówek `x-hero-pin` | unieważnia opaskę; adres przestaje oddawać kartę, treść karty zostaje |
+| POST | `/api/cards/:tag/move` | nagłówek `x-hero-pin` + `{tagId, pinHash}` | przenosi kartę na nową opaskę i unieważnia starą |
 | POST | `/api/doctors` | — | zakłada konto lekarza (`pwz`, `name`, `password`) |
 | POST | `/api/doctors/session` | `{pwz, password}` | loguje; zwraca token sesji |
 | GET | `/api/doctors/me` | nagłówek `x-hero-doctor` | konto z tokenu |
@@ -164,8 +182,10 @@ skrótu djb2, który nie jest funkcją kryptograficzną. Do produkcji potrzebny 
 Stan na dziś to działający prototyp, nie system produkcyjny. Przed wdrożeniem trzeba domknąć:
 
 - **Odczyt ratunkowy jest jawny dla każdego, kto zna identyfikator opaski.** To świadoma decyzja
-  produktowa — ratownik nie ma czasu na logowanie — ale wymaga długiego, losowego identyfikatora
-  (nie sekwencyjnego jak w przykładach) i mechanizmu unieważniania zgubionej opaski.
+  produktowa: ratownik nie ma czasu na logowanie. Dwie rzeczy, które z niej wynikały, są już zrobione —
+  identyfikator nowej karty niesie 128 bitów losowości, a zgubioną opaskę da się unieważnić i przenieść
+  kartę na nową. Zostaje to, że formatu identyfikatora serwer nie wymusza: bierze każdy pasujący do
+  `TAG`, bo karty założone wcześniej i karta przykładowa z seeda mają identyfikatory krótkie.
 - **Numer PWZ nie jest weryfikowany.** Sprawdzamy tylko format — siedem cyfr. Nie liczymy cyfry
   kontrolnej i nie odpytujemy rejestru Naczelnej Izby Lekarskiej, więc konto nie dowodzi uprawnień.
 - **Dostęp lekarza to nadal PIN pacjenta.** Konto dokłada tożsamość i podpis, nie zmienia sposobu
