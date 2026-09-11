@@ -137,6 +137,10 @@ input::placeholder,textarea::placeholder{color:var(--ink-3)}
 .code{font-family:var(--f-mono);font-size:.78rem;color:var(--ink-3)}
 /* Identyfikator opaski to 31 znaków, więc musi mieć prawo złamać się w dowolnym miejscu. */
 .tagid{font-family:var(--f-mono);overflow-wrap:anywhere}
+/* Kod QR zostaje czarny na białym także w ciemnym motywie: skaner czyta kontrast, nie motyw. */
+.qr{display:block;width:min(200px,52vw);height:auto;background:#fff;border:1px solid var(--line);border-radius:6px}
+.qrbox{display:flex;gap:1rem;flex-wrap:wrap;align-items:flex-start}
+.qrbox > div{flex:1 1 240px;min-width:0}
 
 /* ---------- landing ---------- */
 .hero{display:grid;grid-template-columns:1.15fr .85fr;gap:2.5rem;align-items:center}
@@ -574,6 +578,264 @@ function tagFromText(text){
 }
 /* NFC:END */
 
+/* QR:START — koder kodu QR, tryb bajtowy, korekcja M. Kod QR niesie ten sam adres co opaska, więc
+   działa tam, gdzie NFC nie: na telefonie bez czytnika, na iOS i na kartce w portfelu. Zamknięty
+   blok bez DOM-u, bo test/qr.test.js wycina go z tego pliku i porównuje siatki ze wzorcami. */
+
+/* wersja: [bajty korekcji na blok, [bloki, danych na blok], [bloki, danych na blok]] */
+const QR_EC = {
+  1:[10,[1,16]], 2:[16,[1,28]], 3:[26,[1,44]], 4:[18,[2,32]], 5:[24,[2,43]],
+  6:[16,[4,27]], 7:[18,[4,31]], 8:[22,[2,38],[2,39]], 9:[22,[3,36],[2,37]], 10:[26,[4,43],[1,44]],
+};
+const QR_ALIGN = {2:[6,18], 3:[6,22], 4:[6,26], 5:[6,30], 6:[6,34], 7:[6,22,38], 8:[6,24,42], 9:[6,26,46], 10:[6,28,50]};
+
+/* Ciało Galois GF(256) z wielomianem 0x11D — to samo, na którym stoi korekcja Reeda-Solomona w QR. */
+const GF_EXP = new Uint8Array(512), GF_LOG = new Uint8Array(256);
+(function(){
+  let x = 1;
+  for(let i = 0; i < 255; i++){ GF_EXP[i] = x; GF_LOG[x] = i; x = (x << 1) ^ (x & 0x80 ? 0x11D : 0); }
+  for(let i = 255; i < 512; i++) GF_EXP[i] = GF_EXP[i - 255];
+})();
+const gfMul = (a, b) => (a && b) ? GF_EXP[GF_LOG[a] + GF_LOG[b]] : 0;
+
+/** Wielomian generujący stopnia n: iloczyn (x + α^i). */
+function rsGen(n){
+  let g = [1];
+  for(let i = 0; i < n; i++){
+    const next = new Array(g.length + 1).fill(0);
+    for(let j = 0; j < g.length; j++){
+      next[j] ^= g[j];
+      next[j + 1] ^= gfMul(g[j], GF_EXP[i]);
+    }
+    g = next;
+  }
+  return g;
+}
+
+/** Reszta z dzielenia — bajty korekcji dla jednego bloku danych. */
+function rsRest(dane, n){
+  const gen = rsGen(n);
+  const buf = new Uint8Array(dane.length + n);
+  buf.set(dane);
+  for(let i = 0; i < dane.length; i++){
+    const f = buf[i];
+    if(!f) continue;
+    for(let j = 0; j < gen.length; j++) buf[i + j] ^= gfMul(gen[j], f);
+  }
+  return Array.from(buf.slice(dane.length));
+}
+
+const qrBit = (v, i) => (v >>> i) & 1;
+
+/** Najmniejsza wersja, w której treść się zmieści; null, gdy nie mieści się w żadnej obsługiwanej. */
+function qrVersion(bajtow){
+  for(let w = 1; w <= 10; w++){
+    const [, ...grupy] = QR_EC[w];
+    const dane = grupy.reduce((s, [ile, na]) => s + ile * na, 0);
+    const naglowek = 4 + (w >= 10 ? 16 : 8);
+    if(bajtow * 8 + naglowek <= dane * 8) return w;
+  }
+  return null;
+}
+
+/** Słowa kodowe: nagłówek, treść, wypełnienie, korekcja i przeplot bloków. */
+function qrCodewords(bajty, wersja){
+  const [ecPer, ...grupy] = QR_EC[wersja];
+  const bity = [];
+  const wstaw = (v, n) => { for(let i = n - 1; i >= 0; i--) bity.push(qrBit(v, i)); };
+  wstaw(0b0100, 4);                                   /* tryb bajtowy */
+  wstaw(bajty.length, wersja >= 10 ? 16 : 8);
+  for(const b of bajty) wstaw(b, 8);
+
+  const dane = grupy.reduce((s, [ile, na]) => s + ile * na, 0);
+  const miejsca = dane * 8;
+  for(let i = 0; i < 4 && bity.length < miejsca; i++) bity.push(0);   /* zamknięcie */
+  while(bity.length % 8) bity.push(0);
+  const slowa = [];
+  for(let i = 0; i < bity.length; i += 8) slowa.push(parseInt(bity.slice(i, i + 8).join(""), 2));
+  for(let i = 0; slowa.length < dane; i++) slowa.push(i % 2 ? 0x11 : 0xEC);   /* wypełniacze z normy */
+
+  const bloki = [], korekcje = [];
+  let poz = 0;
+  for(const [ile, na] of grupy){
+    for(let i = 0; i < ile; i++){
+      const blok = slowa.slice(poz, poz + na);
+      poz += na;
+      bloki.push(blok);
+      korekcje.push(rsRest(blok, ecPer));
+    }
+  }
+  const out = [];
+  const najdluzszy = Math.max(...bloki.map(b => b.length));
+  for(let i = 0; i < najdluzszy; i++) for(const b of bloki) if(i < b.length) out.push(b[i]);
+  for(let i = 0; i < ecPer; i++) for(const k of korekcje) out.push(k[i]);
+  return out;
+}
+
+/** Siatka modułów: true znaczy ciemny. Zwraca null, gdy treść nie mieści się w wersji 10. */
+function qrMatrix(tekst){
+  const bajty = Array.from(new TextEncoder().encode(String(tekst == null ? "" : tekst)));
+  const wersja = qrVersion(bajty.length);
+  if(!wersja) return null;
+  const n = 17 + 4 * wersja;
+  const mod = Array.from({length:n}, () => new Array(n).fill(false));
+  const fun = Array.from({length:n}, () => new Array(n).fill(false));
+  const set = (x, y, v) => { mod[y][x] = !!v; fun[y][x] = true; };
+
+  /* znaczniki pozycji z separatorami */
+  for(const [ox, oy] of [[0,0], [n-7,0], [0,n-7]]){
+    for(let dy = -1; dy <= 7; dy++) for(let dx = -1; dx <= 7; dx++){
+      const x = ox + dx, y = oy + dy;
+      if(x < 0 || y < 0 || x >= n || y >= n) continue;
+      const ramka = dx === 0 || dx === 6 || dy === 0 || dy === 6;
+      const srodek = dx >= 2 && dx <= 4 && dy >= 2 && dy <= 4;
+      set(x, y, (ramka && dx >= 0 && dx <= 6 && dy >= 0 && dy <= 6) || srodek);
+    }
+  }
+  /* linie taktujące */
+  for(let i = 8; i < n - 8; i++){ set(6, i, i % 2 === 0); set(i, 6, i % 2 === 0); }
+  /* znaczniki wyrównania */
+  const osie = QR_ALIGN[wersja] || [];
+  for(const cy of osie) for(const cx of osie){
+    if((cx === 6 && cy === 6) || (cx === 6 && cy === n - 7) || (cx === n - 7 && cy === 6)) continue;
+    for(let dy = -2; dy <= 2; dy++) for(let dx = -2; dx <= 2; dx++)
+      set(cx + dx, cy + dy, Math.max(Math.abs(dx), Math.abs(dy)) !== 1);
+  }
+  /* miejsce na informację o formacie i o wersji */
+  for(let i = 0; i < 9; i++){ if(!fun[8][i]) set(i, 8, false); if(!fun[i][8]) set(8, i, false); }
+  for(let i = 0; i < 8; i++){ if(!fun[8][n-1-i]) set(n-1-i, 8, false); if(!fun[n-1-i][8]) set(8, n-1-i, false); }
+  if(wersja >= 7) for(let i = 0; i < 18; i++){
+    const a = n - 11 + i % 3, b = Math.floor(i / 3);
+    if(!fun[b][a]) set(a, b, false);
+    if(!fun[a][b]) set(b, a, false);
+  }
+
+  /* dane wężykiem: pary kolumn od prawej, z pominięciem kolumny linii taktującej */
+  const slowa = qrCodewords(bajty, wersja);
+  let bit = 0;
+  for(let prawa = n - 1; prawa >= 1; prawa -= 2){
+    if(prawa === 6) prawa = 5;
+    for(let pion = 0; pion < n; pion++) for(let j = 0; j < 2; j++){
+      const x = prawa - j;
+      const wGore = ((prawa + 1) & 2) === 0;
+      const y = wGore ? n - 1 - pion : pion;
+      if(fun[y][x]) continue;
+      if(bit < slowa.length * 8) mod[y][x] = !!qrBit(slowa[bit >>> 3], 7 - (bit & 7));
+      bit++;
+    }
+  }
+
+  const maska = (m, x, y) => {
+    switch(m){
+      case 0: return (x + y) % 2 === 0;
+      case 1: return y % 2 === 0;
+      case 2: return x % 3 === 0;
+      case 3: return (x + y) % 3 === 0;
+      case 4: return (Math.floor(x / 3) + Math.floor(y / 2)) % 2 === 0;
+      case 5: return (x * y) % 2 + (x * y) % 3 === 0;
+      case 6: return ((x * y) % 2 + (x * y) % 3) % 2 === 0;
+      default: return ((x + y) % 2 + (x * y) % 3) % 2 === 0;
+    }
+  };
+  const format = m => {
+    let r = m;                                     /* korekcja M to 00, więc dane = sama maska */
+    for(let i = 0; i < 10; i++) r = (r << 1) ^ ((r >>> 9) * 0x537);
+    return ((m << 10) | (r & 0x3FF)) ^ 0x5412;
+  };
+
+  let najlepsza = 0, najlepszaKara = Infinity;
+  for(let m = 0; m < 8; m++){
+    nalozMaske(mod, fun, m, maska);
+    wpiszFormat(mod, format(m), n);
+    if(wersja >= 7) wpiszWersje(mod, wersja, n);
+    const kara = qrKara(mod, n);
+    if(kara < najlepszaKara){ najlepszaKara = kara; najlepsza = m; }
+    nalozMaske(mod, fun, m, maska);               /* maska jest swoją własną odwrotnością */
+  }
+  nalozMaske(mod, fun, najlepsza, maska);
+  wpiszFormat(mod, format(najlepsza), n);
+  if(wersja >= 7) wpiszWersje(mod, wersja, n);
+  return mod;
+}
+
+function nalozMaske(mod, fun, m, maska){
+  for(let y = 0; y < mod.length; y++) for(let x = 0; x < mod.length; x++)
+    if(!fun[y][x] && maska(m, x, y)) mod[y][x] = !mod[y][x];
+}
+/* Dwie kopie informacji o formacie: wzdłuż kolumny 8 i wiersza 8. Indeks pierwszy to wiersz. */
+function wpiszFormat(mod, bity, n){
+  for(let i = 0; i <= 5; i++) mod[i][8] = !!qrBit(bity, i);
+  mod[7][8] = !!qrBit(bity, 6);
+  mod[8][8] = !!qrBit(bity, 7);
+  mod[8][7] = !!qrBit(bity, 8);
+  for(let i = 9; i < 15; i++) mod[8][14 - i] = !!qrBit(bity, i);
+  for(let i = 0; i < 8; i++) mod[8][n - 1 - i] = !!qrBit(bity, i);
+  for(let i = 8; i < 15; i++) mod[n - 15 + i][8] = !!qrBit(bity, i);
+  mod[n - 8][8] = true;                            /* moduł zawsze ciemny */
+}
+function wpiszWersje(mod, wersja, n){
+  let r = wersja;
+  for(let i = 0; i < 12; i++) r = (r << 1) ^ ((r >>> 11) * 0x1F25);
+  const bity = (wersja << 12) | (r & 0xFFF);
+  for(let i = 0; i < 18; i++){
+    const v = !!qrBit(bity, i), a = n - 11 + i % 3, b = Math.floor(i / 3);
+    mod[b][a] = v;
+    mod[a][b] = v;
+  }
+}
+
+/** Kara z normy: cztery reguły, im mniej, tym czytelniej dla skanera. */
+function qrKara(mod, n){
+  let kara = 0;
+  const serie = linia => {
+    let ile = 1;
+    for(let i = 1; i <= linia.length; i++){
+      if(i < linia.length && linia[i] === linia[i - 1]){ ile++; continue; }
+      if(ile >= 5) kara += 3 + (ile - 5);
+      ile = 1;
+    }
+  };
+  for(let i = 0; i < n; i++){
+    serie(mod[i]);
+    serie(mod.map(r => r[i]));
+  }
+  for(let y = 0; y < n - 1; y++) for(let x = 0; x < n - 1; x++){
+    const a = mod[y][x];
+    if(a === mod[y][x+1] && a === mod[y+1][x] && a === mod[y+1][x+1]) kara += 3;
+  }
+  const wzor = [true,false,true,true,true,false,true];
+  const szukaj = linia => {
+    for(let i = 0; i + 7 <= linia.length; i++){
+      if(!wzor.every((v, k) => linia[i + k] === v)) continue;
+      const przed = linia.slice(Math.max(0, i - 4), i);
+      const po = linia.slice(i + 7, i + 11);
+      if((przed.length === 4 && przed.every(v => !v)) || (po.length === 4 && po.every(v => !v))) kara += 40;
+    }
+  };
+  for(let i = 0; i < n; i++){
+    szukaj(mod[i]);
+    szukaj(mod.map(r => r[i]));
+  }
+  let ciemne = 0;
+  for(const r of mod) for(const v of r) if(v) ciemne++;
+  kara += Math.floor(Math.abs(ciemne * 20 - n * n * 10) / (n * n)) * 10;
+  return kara;
+}
+
+/** Kod QR jako SVG w treści strony: bez żądań na zewnątrz i ostry przy druku. */
+function qrSvg(tekst, opis){
+  const mod = qrMatrix(tekst);
+  if(!mod) return "";
+  const n = mod.length, cisza = 4, bok = n + 2 * cisza;
+  let sciezka = "";
+  for(let y = 0; y < n; y++) for(let x = 0; x < n; x++)
+    if(mod[y][x]) sciezka += "M" + (x + cisza) + " " + (y + cisza) + "h1v1h-1z";
+  return '<svg class="qr" viewBox="0 0 ' + bok + ' ' + bok + '" role="img" aria-label="' + (opis || "Kod QR z adresem karty")
+    + '" shape-rendering="crispEdges"><rect width="' + bok + '" height="' + bok + '" fill="#fff"/>'
+    + '<path d="' + sciezka + '" fill="#000"/></svg>';
+}
+/* QR:END */
+
 /**
  * Web NFC. Działa w Chrome na Androidzie, wyłącznie w bezpiecznym kontekście i po geście
  * użytkownika; gdzie indziej konstruktora nie ma i zostaje adres do przepisania ręcznie.
@@ -988,7 +1250,13 @@ async function renderTab(){
         ? '<div class="notice crit"><span>Ta opaska jest unieważniona od '+esc(fmtDT(CARD.revokedAt))+'. Pod jej adresem nikt nie dostanie karty — ani ratownik, ani ty. Karta ma się znów odczytywać? Przenieś ją na nową opaskę.</span></div>'
         : "")
     + '<p class="small muted">W opasce zostaje sam adres tej karty, bez danych medycznych. Kto zbliży do niej telefon, otworzy ten adres: pacjent i lekarz trafią na pytanie o PIN, każdy inny na odczyt ratunkowy.</p>'
-    + '<label class="f">Adres zapisywany w opasce<input class="mono" id="nfcUrl" readonly value="'+esc(url)+'"></label>'
+    + '<div class="qrbox">'
+    +   (base ? qrSvg(url, "Kod QR z adresem karty " + CARD.tagId) : "")
+    +   '<div>'
+    +     '<label class="f">Adres zapisywany w opasce<input class="mono" id="nfcUrl" readonly value="'+esc(url)+'"></label>'
+    +     '<p class="tiny muted" style="margin-top:.5rem">Kod QR niesie ten sam adres. Działa tam, gdzie NFC nie: na telefonie bez czytnika, na iOS i po wydrukowaniu. Aparat telefonu wystarczy — kod prowadzi na ten sam ekran co zbliżenie opaski.</p>'
+    +   '</div>'
+    + '</div>'
     + '<div class="row">'
     +   '<button class="btn btn-primary" id="nfcWrite"'+(mozeZapisac?"":" disabled")+'>Zapisz kartę na opasce</button>'
     +   '<button class="btn" id="nfcCheck"'+(nfcReady()?"":" disabled")+'>Sprawdź, co jest na opasce</button>'

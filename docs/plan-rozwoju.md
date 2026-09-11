@@ -102,8 +102,8 @@ odczytu i czy dane trafiają do tej samej karty pacjenta.
 Wcześniejsze punkty zakładają, że ratownik ma działający telefon z NFC i zasięg. Każde z tych
 założeń bywa fałszywe, a karta ma sens tylko wtedy, gdy da się ją odczytać:
 
-- kod QR z tym samym adresem obok tagu NFC — dla telefonów bez NFC i dla sytuacji, w której
-  czytnik jest wyłączony,
+- ~~kod QR z tym samym adresem obok tagu NFC~~ — zrobione: kod QR z adresem karty jest w zakładce
+  „Opaska NFC", koder w `web/app.html`, bez zależności,
 - widok do druku (`@media print`) i eksport karty do PDF: kartka w portfelu jako zapas przy
   rozładowanym telefonie pacjenta,
 - odczyt ratunkowy dostępny offline (service worker), bo w karetce brak zasięgu jest normą,

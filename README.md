@@ -84,6 +84,12 @@ localhost) i po kliknięciu. Gdzie indziej — w tym na iOS — przyciski są wy
 do skopiowania i zapisania dowolną aplikacją do NFC jako rekord typu URL. Ratownik do odczytu żadnej
 aplikacji nie potrzebuje: Android i iOS otwierają adres z opaski same.
 
+Obok adresu jest kod QR z tą samą treścią. Działa tam, gdzie NFC nie: na telefonie bez czytnika,
+na iOS, przy wyłączonym module NFC i po wydrukowaniu. Koder siedzi w `web/app.html` (tryb bajtowy,
+korekcja M, wersje 1–10, czyli do 213 bajtów) i nie ma zależności — kod powstaje jako SVG w treści
+strony, więc nie wychodzi z niej żadne żądanie. Zostaje czarny na białym także w ciemnym motywie,
+bo skaner czyta kontrast, nie motyw.
+
 Po zbliżeniu opaski otwiera się jeden adres, a zakres zależy od tego, kto go otworzył:
 
 | Kto zbliżył | Co widzi |
@@ -131,7 +137,8 @@ server/secrets.js scrypt na PIN-ach kart i hasłach lekarzy
 server/limit.js   licznik żądań w oknie czasu
 server/seed.js    przykładowa karta i konto lekarza
 test/api.test.js  testy API
-test/nfc.test.js  adres zapisywany w opasce (blok NFC wycięty z web/app.html)
+test/nfc.test.js  identyfikator i adres opaski (blok NFC wycięty z web/app.html)
+test/qr.test.js   koder kodu QR (blok QR wycięty z web/app.html)
 .github/workflows testy na każdy push i pull request (Node 22.13, 22 i 24)
 docs/             model danych i plan rozwoju
 ```
