@@ -128,9 +128,10 @@ odczycie ratunkowym nikt nie sprawdzi u pacjenta.
   to nie dotyczy, bo PIN-u w niej nie ma,
 - migracje schematu (dziś `CREATE TABLE IF NOT EXISTS` przy starcie),
 - wersjonowanie karty: kto i co zmienił, z możliwością cofnięcia,
-- testy interfejsu. Z `web/app.html` sprawdzony jest sam adres opaski (`test/nfc.test.js` wycina
-  blok `NFC:START … NFC:END` i uruchamia go bez przeglądarki); reszta logiki została bez testów,
-  w tym `critical()`, która decyduje o zawartości odczytu ratunkowego,
+- testy interfejsu. Z `web/app.html` sprawdzone są trzy bloki wycięte z pliku i uruchamiane bez
+  przeglądarki: identyfikator i adres opaski (`NFC`), koder kodu QR (`QR`) oraz zawartość i kolejność
+  odczytu ratunkowego (`KARTA`, czyli `critical`, sortowanie wpisów, pasek flag i podsumowanie do
+  przekazania). Bez testów zostaje warstwa rysująca: widoki, formularze i routing,
 - rozszerzenie CI poza `npm test`: dziś workflow uruchamia same testy API na trzech wersjach Node-a,
 - ~~opis wdrożenia~~ — zrobione: `Dockerfile`, jednostka systemd, przykład nginx i Caddy oraz kopia
   zapasowa bazy w sekcji „Wdrożenie" w README,
