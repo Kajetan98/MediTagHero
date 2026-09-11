@@ -1,7 +1,10 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { createServer } from "../server/index.js";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { createServer, tlsFromEnv } from "../server/index.js";
 import { openDatabase } from "../server/db.js";
 import { rateLimiter } from "../server/limit.js";
 
@@ -248,4 +251,29 @@ test("serwer oddaje aplikację pod adresem głównym", async () => {
   const html = await r.text();
   assert.match(html, /<title>HERO<\/title>/);
   assert.match(html, /Odczyt ratunkowy/);
+});
+
+test("każda odpowiedź niesie nagłówki bezpieczeństwa, HSTS tylko pod TLS-em", async () => {
+  for (const sciezka of ["/api/health", "/"]) {
+    const r = await call(sciezka);
+    assert.equal(r.headers.get("x-content-type-options"), "nosniff", sciezka);
+    assert.equal(r.headers.get("x-frame-options"), "DENY", sciezka);
+    assert.match(r.headers.get("content-security-policy") || "", /default-src 'self'/, sciezka);
+    assert.equal(r.headers.get("strict-transport-security"), null, sciezka + " — serwer testowy chodzi po HTTP");
+  }
+});
+
+test("TLS bierze się ze ścieżek w środowisku albo nie bierze wcale", () => {
+  assert.equal(tlsFromEnv({}), null, "bez zmiennych serwer zostaje na HTTP");
+  assert.equal(tlsFromEnv({ HERO_TLS_KEY: "a" }), null, "sam klucz bez certyfikatu to nie TLS");
+
+  const dir = mkdtempSync(join(tmpdir(), "hero-tls-"));
+  writeFileSync(join(dir, "key.pem"), "klucz");
+  writeFileSync(join(dir, "cert.pem"), "certyfikat");
+  const wczytane = tlsFromEnv({ HERO_TLS_KEY: join(dir, "key.pem"), HERO_TLS_CERT: join(dir, "cert.pem") });
+  assert.equal(wczytane.key.toString(), "klucz");
+  assert.equal(wczytane.cert.toString(), "certyfikat");
+
+  assert.throws(() => tlsFromEnv({ HERO_TLS_KEY: join(dir, "nie-ma.pem"), HERO_TLS_CERT: join(dir, "cert.pem") }),
+    /certyfikat/i, "brakujący plik zatrzymuje start z czytelnym błędem");
 });

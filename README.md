@@ -18,10 +18,33 @@ flagi `--experimental-sqlite`, której serwer nie ustawia. Projekt nie ma zależ
 ```bash
 npm start          # buduje public/index.html i startuje serwer na :8080
 npm run seed       # przykładowa karta HERO-2481-KX (PIN 1234) i konto lekarza (PWZ 1234567, hasło meditag123)
-npm test           # testy API (node:test)
+npm run cert       # certyfikat samopodpisany do testów po HTTPS (wymaga openssl)
+npm test           # testy API i logiki adresu opaski (node:test)
 ```
 
 Baza powstaje w `data/hero.sqlite`; ścieżkę zmienia zmienna `HERO_DB`, port — `PORT`.
+
+### HTTPS
+
+Zapis opaski i skrót PIN-u liczony przez `crypto.subtle` wymagają bezpiecznego kontekstu, a ten poza
+`localhost` znaczy HTTPS. Serwer nasłuchuje po TLS-ie, gdy dostanie ścieżki do klucza i certyfikatu;
+domyślny port zmienia się wtedy na 8443:
+
+```bash
+npm run cert                                                        # data/tls/{key,cert}.pem
+HERO_TLS_KEY=data/tls/key.pem HERO_TLS_CERT=data/tls/cert.pem npm start
+```
+
+Certyfikat samopodpisany wystarcza do testów w sieci lokalnej — `npm run cert` wystawia go na adresy
+IPv4 tego komputera i wypisuje adres do wpisania w telefonie. Telefon pokaże ostrzeżenie, które trzeba
+przejść ręcznie; jeśli po jego przejściu Chrome nadal nie daje Web NFC, trzeba zainstalować `cert.pem`
+w telefonie jako zaufany albo wystawić serwer przez tunel z własnym certyfikatem. Do produkcji idzie
+certyfikat z urzędu na reverse proxy — patrz [Wdrożenie](#wdrożenie).
+
+Pod TLS-em serwer dokłada `Strict-Transport-Security`. Nagłówki `Content-Security-Policy`,
+`X-Content-Type-Options`, `X-Frame-Options` i `Referrer-Policy` idą z każdą odpowiedzią niezależnie od
+protokołu. CSP dopuszcza styl i skrypt wstawione w plik, bo aplikacja jest jednym plikiem, ale zamyka
+wszystkie źródła zewnętrzne — strona nie wysyła żadnego żądania poza własny adres.
 
 Bez uruchomionego serwera ten sam plik działa samodzielnie: aplikacja wykrywa brak `/api/health`
 i zapisuje karty w `localStorage` przeglądarki — razem ze skrótem PIN-u i historią odczytów, bo nic

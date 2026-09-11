@@ -1,5 +1,7 @@
 import { createServer as createHttpServer } from "node:http";
+import { createServer as createHttpsServer } from "node:https";
 import { readFile, stat } from "node:fs/promises";
+import { readFileSync } from "node:fs";
 import { join, normalize, extname, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { openDatabase, READ_CTX } from "./db.js";
@@ -11,6 +13,38 @@ const PUBLIC = join(ROOT, "public");
 const TAG = /^[A-Z0-9][A-Z0-9-]{2,31}$/;
 const TYPES = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8",
   ".svg": "image/svg+xml", ".png": "image/png", ".jpg": "image/jpeg", ".webp": "image/webp", ".ico": "image/x-icon", ".json": "application/json; charset=utf-8" };
+
+/**
+ * Nagłówki na każdej odpowiedzi. CSP dopuszcza treść wstawioną w plik, bo aplikacja jest jednym
+ * plikiem: styl i skrypt siedzą w `<style>` i `<script>`, a kroje i znaki w data URI. Zewnętrznych
+ * źródeł nie ma żadnych, więc `'self'` i `data:` domykają listę. Formularze aplikacji obsługuje
+ * skrypt, nigdy wysłanie, więc `form-action 'none'` nic nie psuje.
+ */
+const SAFE = {
+  "x-content-type-options": "nosniff",
+  "referrer-policy": "no-referrer",
+  "x-frame-options": "DENY",
+  "content-security-policy": [
+    "default-src 'self'", "script-src 'self' 'unsafe-inline'", "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data:", "font-src 'self' data:", "connect-src 'self'",
+    "form-action 'none'", "base-uri 'none'", "frame-ancestors 'none'",
+  ].join("; "),
+};
+
+/**
+ * Klucz i certyfikat ze ścieżek w środowisku. Bez nich serwer zostaje na HTTP — a wtedy przeglądarka
+ * nie da aplikacji ani Web NFC, ani `crypto.subtle`, bo oba wymagają bezpiecznego kontekstu.
+ * Certyfikat do testów w sieci lokalnej robi `npm run cert`.
+ */
+export function tlsFromEnv(env = process.env) {
+  const key = env.HERO_TLS_KEY, cert = env.HERO_TLS_CERT;
+  if (!key || !cert) return null;
+  try {
+    return { key: readFileSync(key), cert: readFileSync(cert) };
+  } catch (err) {
+    throw new Error("Nie mogę wczytać certyfikatu TLS: " + err.message);
+  }
+}
 
 const send = (res, status, body, headers = {}) => {
   const payload = body === undefined ? "" : JSON.stringify(body);
@@ -51,8 +85,12 @@ async function serveStatic(res, pathname) {
 
 export function createServer(store = openDatabase(),
                              reads = rateLimiter({ limit: 30, windowMs: 60_000 }),
-                             pins = rateLimiter({ limit: 10, windowMs: 15 * 60_000 })) {
-  const server = createHttpServer(async (req, res) => {
+                             pins = rateLimiter({ limit: 10, windowMs: 15 * 60_000 }),
+                             tls = tlsFromEnv()) {
+  /* HSTS tylko pod TLS-em: na HTTP zablokowałby dostęp do serwera bez certyfikatu. */
+  const safe = tls ? { ...SAFE, "strict-transport-security": "max-age=31536000" } : SAFE;
+  const handler = async (req, res) => {
+    for (const [k, v] of Object.entries(safe)) res.setHeader(k, v);
     const url = new URL(req.url, "http://localhost");
     const path = decodeURIComponent(url.pathname);
 
@@ -149,12 +187,17 @@ export function createServer(store = openDatabase(),
     } catch (err) {
       return fail(res, 400, "Nieprawidłowe żądanie: " + err.message);
     }
-  });
+  };
+  const server = tls ? createHttpsServer(tls, handler) : createHttpServer(handler);
   server.on("close", () => { try { store.close(); } catch {} });
   return server;
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
-  const port = Number(process.env.PORT || 8080);
-  createServer().listen(port, () => console.log("HERO działa na http://localhost:" + port));
+  const szyfrowany = !!(process.env.HERO_TLS_KEY && process.env.HERO_TLS_CERT);
+  const port = Number(process.env.PORT || (szyfrowany ? 8443 : 8080));
+  createServer().listen(port, () => {
+    console.log(`HERO działa na ${szyfrowany ? "https" : "http"}://localhost:${port}`);
+    if (!szyfrowany) console.log("Bez TLS-a przeglądarka nie da zapisu opaski NFC — patrz `npm run cert`.");
+  });
 }
