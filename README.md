@@ -136,7 +136,9 @@ u ratownika, wymaga serwera.
 
 ```
 web/app.html      źródło aplikacji (jeden plik: style + widoki + logika)
+Dockerfile        obraz serwera; .dockerignore trzyma poza nim bazę, testy i dokumentację
 tools/build.mjs   opakowuje web/app.html w public/index.html
+tools/cert.mjs    certyfikat samopodpisany do testów po HTTPS (npm run cert)
 public/           artefakt builda, serwowany przez serwer
 server/index.js   serwer HTTP i routing
 server/db.js      schemat SQLite i operacje na kartach
@@ -212,12 +214,115 @@ Stan na dziś to działający prototyp, nie system produkcyjny. Przed wdrożenie
 - **Opis czytnika przy odczycie ratunkowym jest deklaracją.** Kontekst wpisu nadaje serwer, a przy
   dostępie lekarza opis bierze się z konta. Przy odczycie ratunkowym pole „kto odczytał" nadal
   wypełnia klient: historia dowodzi, że ktoś sięgnął po kartę, nie tego, kto to był.
-- **Brak TLS po stronie serwera** (zakładany reverse proxy). Limit prób PIN-u działa, ale licznik
-  żyje w pamięci procesu: restart serwera go zeruje, a przy kilku instancjach każda liczy osobno.
+- **Licznik prób żyje w pamięci procesu.** Restart serwera go zeruje, a przy kilku instancjach każda
+  liczy osobno. Za reverse proxy dochodzi to, że serwer widzi adres proxy zamiast klienta, więc limit
+  musi stać także w proxy (przykład w [Wdrożeniu](#wdrożenie)).
 - **Skrót PIN-u siedzi w `sessionStorage`** na czas sesji przeglądarki.
 - **RODO.** Dane o zdrowiu to szczególna kategoria danych osobowych (art. 9 RODO). Przed produkcją:
   ocena skutków dla ochrony danych, szyfrowanie bazy w spoczynku, retencja i eksport danych,
   umowy powierzenia przetwarzania.
+
+## Wdrożenie
+
+Serwer to jeden proces Node i plik SQLite obok niego; zależności z npm nie ma żadnych. TLS kończy
+się na reverse proxy — serwer umie HTTPS sam (patrz [HTTPS](#https)), ale certyfikat z urzędu,
+przekierowanie z portu 80 i limit żądań wygodniej trzymać w proxy.
+
+### Kontener
+
+```bash
+docker build -t hero .
+docker run -d --name hero -p 127.0.0.1:8080:8080 -v hero-data:/data --restart unless-stopped hero
+```
+
+`public/index.html` powstaje przy budowaniu obrazu, więc kontener nie zapisuje nic w katalogu
+aplikacji. Baza leży w wolumenie (`/data/hero.sqlite`), bo bez `-v` zniknęłaby razem z kontenerem.
+Proces chodzi bez roota, a `HEALTHCHECK` odpytuje `/api/health`. Kartę przykładową w świeżej bazie
+zakłada `docker exec hero node --no-warnings server/seed.js`.
+
+### Bez kontenera
+
+```ini
+# /etc/systemd/system/hero.service
+[Unit]
+Description=HERO — karta ratunkowa MediTag
+After=network.target
+
+[Service]
+Type=simple
+User=hero
+WorkingDirectory=/opt/hero
+Environment=PORT=8080
+Environment=HERO_DB=/var/lib/hero/hero.sqlite
+ExecStart=/usr/bin/node --no-warnings server/index.js
+Restart=on-failure
+StateDirectory=hero
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
+```
+
+`ExecStart` nie buduje aplikacji, więc `npm run build` musi pójść przy wdrożeniu — inaczej serwer
+odda stare `public/index.html`.
+
+### Reverse proxy
+
+```nginx
+# w bloku http
+limit_req_zone $binary_remote_addr zone=hero:10m rate=10r/s;
+
+server {
+    listen 443 ssl;
+    http2 on;
+    server_name hero.example;
+
+    ssl_certificate     /etc/letsencrypt/live/hero.example/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/hero.example/privkey.pem;
+
+    # Serwer widzi adres proxy, nie klienta, więc jego własny limit tu nie wystarcza.
+    limit_req zone=hero burst=20 nodelay;
+
+    location / {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+
+server {
+    listen 80;
+    server_name hero.example;
+    return 301 https://$host$request_uri;
+}
+```
+
+W Caddym to samo mieści się w trzech wierszach i samo bierze certyfikat:
+
+```caddy
+hero.example {
+    reverse_proxy 127.0.0.1:8080
+}
+```
+
+Serwer nie czyta `X-Forwarded-For` — liczniki z `server/limit.js` widzą adres proxy, więc za proxy
+liczą wszystkich razem. To dlatego limit musi stać także w proxy.
+
+### Kopia zapasowa
+
+Baza chodzi w trybie WAL, więc kopiowanie samego pliku przy działającym serwerze potrafi dać kopię
+niespójną. Do kopii idzie polecenie SQLite albo zatrzymanie usługi na czas kopiowania:
+
+```bash
+sqlite3 /var/lib/hero/hero.sqlite ".backup '/var/backups/hero-$(date +%F).sqlite'"
+```
+
+Dane o zdrowiu to szczególna kategoria danych osobowych, więc kopie wymagają szyfrowania i terminu
+ważności na równi z bazą. Patrz punkt o RODO w [planie rozwoju](docs/plan-rozwoju.md).
 
 ## Logo
 

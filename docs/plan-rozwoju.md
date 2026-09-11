@@ -119,7 +119,9 @@ odczycie ratunkowym nikt nie sprawdzi u pacjenta.
 
 - wspólny magazyn dla liczników z `server/limit.js` (dziś pamięć procesu: restart zeruje limit prób
   PIN-u, a każda instancja liczy osobno),
-- TLS i nagłówki bezpieczeństwa (dziś zakładany reverse proxy),
+- ~~TLS i nagłówki bezpieczeństwa~~ — zrobione: serwer nasłuchuje po HTTPS, gdy dostanie klucz
+  i certyfikat, a nagłówki (CSP, nosniff, DENY na ramki, brak referrera, HSTS pod TLS-em) idą z każdą
+  odpowiedzią,
 - zmiana PIN-u bez usuwania karty,
 - migracje schematu (dziś `CREATE TABLE IF NOT EXISTS` przy starcie),
 - wersjonowanie karty: kto i co zmienił, z możliwością cofnięcia,
@@ -127,5 +129,6 @@ odczycie ratunkowym nikt nie sprawdzi u pacjenta.
   blok `NFC:START … NFC:END` i uruchamia go bez przeglądarki); reszta logiki została bez testów,
   w tym `critical()`, która decyduje o zawartości odczytu ratunkowego,
 - rozszerzenie CI poza `npm test`: dziś workflow uruchamia same testy API na trzech wersjach Node-a,
-- opis wdrożenia: obraz kontenera i konfiguracja reverse proxy zakładanego w README,
+- ~~opis wdrożenia~~ — zrobione: `Dockerfile`, jednostka systemd, przykład nginx i Caddy oraz kopia
+  zapasowa bazy w sekcji „Wdrożenie" w README,
 - lista zależności Pythona dla `tools/logos.py` (skrypt wymaga Pillow).
