@@ -104,8 +104,9 @@ założeń bywa fałszywe, a karta ma sens tylko wtedy, gdy da się ją odczyta�
 
 - ~~kod QR z tym samym adresem obok tagu NFC~~ — zrobione: kod QR z adresem karty jest w zakładce
   „Opaska NFC", koder w `web/app.html`, bez zależności,
-- widok do druku (`@media print`) i eksport karty do PDF: kartka w portfelu jako zapas przy
-  rozładowanym telefonie pacjenta,
+- ~~widok do druku (`@media print`)~~ — zrobione: „Wydrukuj kartę do portfela" w zakładce „Opaska NFC"
+  składa zestaw krytyczny na jedną stronę, z kodem QR. Eksport do PDF robi okno drukowania przeglądarki,
+  osobnego generatora nie ma,
 - odczyt ratunkowy dostępny offline (service worker), bo w karetce brak zasięgu jest normą,
 - wersja angielska odczytu. Model ma pole `person.langs`, ale interfejs jest wyłącznie polski —
   dotyczy to zarówno pacjenta za granicą, jak i obcokrajowca leczonego w Polsce.

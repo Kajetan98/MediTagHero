@@ -104,6 +104,14 @@ otwarto PIN-em pacjenta, leżą w `localStorage` pod kluczem `hero.owners.v1`, a
 stamtąd kasuje. Zakres i tak otwiera dopiero PIN, a odczyt ratunkowy jest jawny dla każdego, kto zna
 identyfikator opaski — z podpowiedzi albo bez niej. Rolę można przełączyć ręcznie paskiem nad kartą.
 
+### Karta do portfela
+
+Przycisk „Wydrukuj kartę do portfela" w tej samej zakładce składa zestaw krytyczny na jedną stronę:
+czarno na białym, w kolejności z odczytu ratunkowego (alergie, leki z wyróżnionymi antykoagulantami,
+choroby, wszczepy i uwagi, kontakt alarmowy), z kodem QR prowadzącym pod adres karty. To zapas na
+sytuację, w której telefon pacjenta jest rozładowany, a opaski nie ma czym odczytać. Styl `@media print`
+zdejmuje z wydruku pasek górny, stopkę i przyciski.
+
 ### Zgubiona opaska
 
 Sam identyfikator z opaski otwiera odczyt ratunkowy, więc opaska zgubiona jest kluczem do zestawu
