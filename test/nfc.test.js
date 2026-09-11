@@ -10,7 +10,9 @@ import { runInNewContext } from "node:vm";
 const src = readFileSync(new URL("../web/app.html", import.meta.url), "utf8");
 const blok = src.match(/\/\* NFC:START[\s\S]*?\/\* NFC:END \*\//);
 assert.ok(blok, "w web/app.html nie ma bloku NFC:START … NFC:END");
-const { appBase, tagUrl, tagFromText } = runInNewContext("(function(){" + blok[0] + "\nreturn {appBase, tagUrl, tagFromText};})()");
+const { appBase, tagUrl, tagFromText, genTag, TAG_RE } = runInNewContext(
+  "(function(){" + blok[0] + "\nreturn {appBase, tagUrl, tagFromText, genTag, TAG_RE};})()",
+  { crypto });
 
 const TAG = "HERO-2481-KX";
 
@@ -39,4 +41,21 @@ test("treść spoza opaski HERO nie udaje identyfikatora", () => {
   assert.equal(tagFromText(""), null);
   assert.equal(tagFromText("ok"), null, "identyfikator ma co najmniej trzy znaki");
   assert.equal(tagFromText("-HERO-1"), null, "identyfikator nie zaczyna się myślnikiem");
+});
+
+test("identyfikator opaski niesie 128 bitów losowości", () => {
+  const tag = genTag();
+  assert.match(tag, /^HERO-[0-9A-HJKMNP-TV-Z]{26}$/, "prefiks i 26 znaków base32 Crockforda: " + tag);
+  assert.equal(tag.length, 31, "musi zmieścić się w 32 znakach, które przepuszcza serwer");
+  assert.ok(TAG_RE.test(tag), "serwer przyjmuje ten identyfikator");
+  assert.equal(tagFromText(tagUrl(tag, "https://hero.example/")), tag, "wraca z adresu opaski");
+
+  const widziane = new Set();
+  for (let i = 0; i < 2000; i++) widziane.add(genTag());
+  assert.equal(widziane.size, 2000, "dwa tysiące losowań bez powtórzenia");
+});
+
+test("stary, krótki identyfikator działa dalej", () => {
+  assert.ok(TAG_RE.test("HERO-2481-KX"), "karta przykładowa z seeda");
+  assert.equal(tagFromText("https://hero.example/#/t/HERO-2481-KX"), "HERO-2481-KX");
 });

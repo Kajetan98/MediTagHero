@@ -7,7 +7,8 @@ czasu leży w kolumnie `data` jako JSON, żeby zmiana zakresu karty nie wymagał
 
 ```sql
 cards (
-  tag_id     TEXT PRIMARY KEY,   -- identyfikator opaski, np. HERO-2481-KX
+  tag_id     TEXT PRIMARY KEY,   -- identyfikator opaski: HERO- i 128 bitów w base32 Crockforda
+                                 -- (stare, krótkie jak HERO-2481-KX działają dalej)
   name       TEXT,               -- zdenormalizowane na potrzeby listy
   pin        TEXT,               -- scrypt$<sól>$<klucz> ze skrótu przysłanego przez przeglądarkę
   data       TEXT,               -- JSON: person, allergies, meds, conditions, contacts
@@ -140,9 +141,17 @@ bo ten sam plik chodzi też poza serwerem HERO, gdzie ścieżki nikt nie routuje
 
 Adres jest jeden dla wszystkich, więc zakres po zbliżeniu wybiera przeglądarka: otwarta sesja
 karty wchodzi prosto do edytora, zalogowane konto lekarza dostaje pytanie o PIN pacjenta, reszta
-odczyt ratunkowy. Identyfikatory opasek otwartych PIN-em pacjenta leżą w `localStorage` pod
-kluczem `hero.owners.v1` — to podpowiedź do wyboru roli, nie uprawnienie: kartę i tak otwiera
-dopiero PIN, a odczyt ratunkowy jest jawny dla każdego, kto zna identyfikator.
+odczyt ratunkowy. Opaski otwarte PIN-em pacjenta leżą w `localStorage` pod kluczem `hero.owners.v1`
+jako `{tag, name, at}` — to podpowiedź do wyboru roli i lista na ekranie pacjenta, nie uprawnienie:
+kartę i tak otwiera dopiero PIN, a odczyt ratunkowy jest jawny dla każdego, kto zna identyfikator.
+
+**Identyfikator opaski nadaje przeglądarka i ma 128 bitów losowości** (`genTag` w bloku `NFC`,
+base32 Crockforda bez I, L, O i U, `HERO-` plus 26 znaków). Skoro sam identyfikator otwiera odczyt
+ratunkowy, jego długość jest tu jedyną ochroną przed zgadywaniem. Serwer formatu nie wymusza — bierze
+każdy identyfikator pasujący do `TAG` (do 32 znaków), bo karty założone wcześniej i karta przykładowa
+z `npm run seed` mają identyfikatory krótkie. Nikt takiego identyfikatora nie wpisze z pamięci, więc
+ekran pacjenta podaje listę opasek znanych tej przeglądarce, a pełny identyfikator zostaje w opasce
+i w kodzie QR.
 
 **Identyfikatory wpisów nadaje przeglądarka** (`Math.random`), bo wpisy nie wychodzą poza jedną kartę.
 Identyfikatory odczytów nadaje serwer (`randomUUID`), bo są dowodem dostępu — poza trybem bez
