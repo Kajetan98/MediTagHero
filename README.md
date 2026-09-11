@@ -174,6 +174,7 @@ server/seed.js    przykładowa karta i konto lekarza
 test/api.test.js  testy API
 test/nfc.test.js  identyfikator i adres opaski (blok NFC wycięty z web/app.html)
 test/qr.test.js   koder kodu QR (blok QR wycięty z web/app.html)
+test/karta.test.js zawartość i kolejność odczytu ratunkowego (blok KARTA)
 .github/workflows testy na każdy push i pull request (Node 22.13, 22 i 24)
 docs/             model danych i plan rozwoju
 ```
@@ -214,7 +215,8 @@ unieważnienie opaski, przeniesienie karty i jej usunięcie. Za reverse proxy se
 więc limit trzeba postawić także tam.
 
 `GET /api/cards/:tag` oddaje kartę w całości, także rozpoznania ze statusem `przebyta`. Zawężenie do
-zestawu krytycznego robi przeglądarka (`critical()` w `web/app.html`), nie serwer.
+zestawu krytycznego robi przeglądarka, nie serwer: `critical()` i kolejność wpisów leżą w bloku
+`KARTA` w `web/app.html`, a `test/karta.test.js` sprawdza je bez przeglądarki.
 
 Przeglądarka nie wysyła PIN-u. Liczy `SHA-256("hero:<tag>:<pin>")`, a serwer przepuszcza ten skrót
 jeszcze raz przez scrypt z losową solą. Gdy `crypto.subtle` jest niedostępne — a jest tylko

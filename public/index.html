@@ -337,7 +337,6 @@ const PWZ_RE = /^[0-9]{7}$/;
 let API = false;      /* true, gdy odpowiada serwer HERO */
 let PIN_DG = null;    /* skrót PIN-u bieżącej sesji, wysyłany przy zapisie */
 let DOCTOR = null;    /* zalogowane konto lekarza: {token, name, pwz} */
-const SEV = {1:"łagodna", 2:"umiarkowana", 3:"ciężka", 4:"anafilaksja"};
 
 async function digest(tagId, pin){
   const raw = "hero:" + tagId + ":" + pin;
@@ -386,17 +385,66 @@ function blankCard(tagId){
     allergies:[], meds:[], conditions:[], contacts:[], reads:[],
     updatedAt: nowISO(), updatedBy:"pacjent" };
 }
+/* KARTA:START — co i w jakiej kolejności widzi ratownik. Blok bez DOM-u, bo to jedyne miejsce,
+   które decyduje o zawartości odczytu ratunkowego; test/karta.test.js wycina go z tego pliku. */
+const SEV = {1:"łagodna", 2:"umiarkowana", 3:"ciężka", 4:"anafilaksja"};
+
+/**
+ * Zestaw krytyczny: karta bez historii odczytów i bez rozpoznań przebytych. Rozpoznanie ze statusem
+ * „przebyta" zostaje w karcie pacjenta, ale na miejscu zdarzenia tylko przeszkadza.
+ */
 function critical(card){
   return {
     tagId: card.tagId,
     person: card.person,
     allergies: card.allergies,
     meds: card.meds,
-    conditions: (card.conditions||[]).filter(c => c.status !== "przebyta"),
+    conditions: (card.conditions || []).filter(c => c.status !== "przebyta"),
     contacts: card.contacts,
-    updatedAt: card.updatedAt, updatedBy: card.updatedBy
+    updatedAt: card.updatedAt, updatedBy: card.updatedBy,
   };
 }
+
+const waga = a => Number(a && a.severity) || 1;
+/** Alergie malejąco po nasileniu: anafilaksja ma być pierwsza, nie gdziekolwiek. */
+const roAllergies = card => (card.allergies || []).slice().sort((x, y) => waga(y) - waga(x));
+/** Leki z antykoagulantami na początku: to one zmieniają decyzje na miejscu zdarzenia. */
+const roMeds = card => (card.meds || []).slice().sort((x, y) => (y.anticoag ? 1 : 0) - (x.anticoag ? 1 : 0));
+
+/**
+ * Pasek flag nad kartą. Kolejność jest celowa: najpierw to, co zabija najszybciej (anafilaksja),
+ * potem krzepnięcie, wszczepy, oświadczenie DNR, na końcu zgoda na pobranie narządów.
+ */
+function roFlags(card){
+  const p = card.person || {};
+  const anafilaksja = roAllergies(card).filter(x => waga(x) >= 3);
+  const krzepnienie = roMeds(card).filter(m => m.anticoag);
+  const flagi = anafilaksja.map(x => ({ waga: "crit", tekst: "Anafilaksja: " + x.allergen }));
+  if(krzepnienie.length) flagi.push({ waga: "crit", tekst: "Antykoagulant: " + krzepnienie.map(m => m.name).join(", ") });
+  if(p.devices) flagi.push({ waga: "warn", tekst: "Wszczep / urządzenie" });
+  if(p.dnr) flagi.push({ waga: "crit", tekst: "DNR — zgłoszone oświadczenie" });
+  if(p.donor) flagi.push({ waga: "ok", tekst: "Dawca narządów" });
+  return flagi;
+}
+
+/** Podsumowanie do przekazania zespołowi — tekstem, bo idzie do schowka i do cudzej dokumentacji. */
+function handoverText(card, lat){
+  const p = card.person || {};
+  const L = [];
+  L.push("HERO — karta ratunkowa MediTag " + card.tagId);
+  L.push("Pacjent: " + (p.name || "nieznany") + (lat != null ? ", " + lat + " lat" : "")
+    + (p.blood ? ", grupa " + p.blood + (p.rh || "") : ""));
+  L.push("Alergie: " + (roAllergies(card).map(x => x.allergen + " (" + SEV[waga(x)] + ")").join("; ") || "brak zgłoszonych"));
+  L.push("Leki: " + (roMeds(card).map(m => m.name + " " + (m.dose || "") + (m.anticoag ? " [ANTYKOAGULANT]" : "")).join("; ") || "brak zgłoszonych"));
+  L.push("Choroby: " + ((card.conditions || []).map(c => c.name + (c.icd10 ? " (" + c.icd10 + ")" : "")).join("; ") || "brak zgłoszonych"));
+  if(p.devices) L.push("Wszczepy/urządzenia: " + p.devices);
+  if(p.dnr) L.push("UWAGA: zgłoszone oświadczenie DNR");
+  const k = (card.contacts || []).find(x => x.primary) || (card.contacts || [])[0];
+  if(k) L.push("Kontakt: " + k.name + " (" + (k.relation || "") + ") " + k.phone);
+  return L.join("\n");
+}
+/* KARTA:END */
+
 
 const api = path => "api/" + path;
 const store = {
@@ -1113,14 +1161,7 @@ async function renderStart(){
 function readoutHTML(card, entry){
   const p = card.person || {};
   const a = age(p.birthDate);
-  const anaph = (card.allergies||[]).filter(x => Number(x.severity) >= 3);
-  const anticoag = (card.meds||[]).filter(m => m.anticoag);
-  const flags = []
-    .concat(anaph.map(x => '<span class="tag tag-crit">Anafilaksja: '+esc(x.allergen)+'</span>'))
-    .concat(anticoag.length ? ['<span class="tag tag-crit">Antykoagulant: '+esc(anticoag.map(m=>m.name).join(", "))+'</span>'] : [])
-    .concat(p.devices ? ['<span class="tag tag-warn">Wszczep / urządzenie</span>'] : [])
-    .concat(p.dnr ? ['<span class="tag tag-crit">DNR — zgłoszone oświadczenie</span>'] : [])
-    .concat(p.donor ? ['<span class="tag tag-ok">Dawca narządów</span>'] : []);
+  const flags = roFlags(card).map(f => '<span class="tag tag-'+f.waga+'">'+esc(f.tekst)+'</span>');
 
   return '<div class="readout">'
   + '<div class="ro-head">'
@@ -1130,10 +1171,10 @@ function readoutHTML(card, entry){
   + '</div>'
   + (flags.length ? '<div class="ro-flags">'+flags.join("")+'</div>' : "")
   + '<div class="ro-sec"><h4>Alergie i nadwrażliwości</h4>'
-  +   ((card.allergies||[]).length ? (card.allergies||[]).slice().sort((x,y)=>y.severity-x.severity).map(allergyRowRO).join("") : '<p class="small muted">Nie zgłoszono żadnej alergii.</p>')
+  +   (roAllergies(card).length ? roAllergies(card).map(allergyRowRO).join("") : '<p class="small muted">Nie zgłoszono żadnej alergii.</p>')
   + '</div>'
   + '<div class="ro-sec"><h4>Przyjmowane leki</h4>'
-  +   ((card.meds||[]).length ? (card.meds||[]).slice().sort((x,y)=>(y.anticoag?1:0)-(x.anticoag?1:0)).map(medRowRO).join("") : '<p class="small muted">Nie zgłoszono leków.</p>')
+  +   (roMeds(card).length ? roMeds(card).map(medRowRO).join("") : '<p class="small muted">Nie zgłoszono leków.</p>')
   + '</div>'
   + '<div class="ro-sec"><h4>Choroby przewlekłe</h4>'
   +   ((card.conditions||[]).length ? (card.conditions||[]).map(condRowRO).join("") : '<p class="small muted">Nie zgłoszono chorób przewlekłych.</p>')
@@ -1156,21 +1197,6 @@ function medRowRO(m){
 function condRowRO(c){
   return '<div class="rec '+(c.status==="aktywna"?"s2":"s1")+'"><div class="main"><div class="name">'+esc(c.name)+' <span class="tag">'+esc(c.status)+'</span>'+sigTag(c)+'</div><div class="meta">'+(c.icd10?'<span class="code">ICD-10 '+esc(c.icd10)+'</span>':"")+(c.note?' · '+esc(c.note):"")+'</div></div></div>';
 }
-function handoverText(card){
-  const p = card.person||{}, a = age(p.birthDate);
-  const L = [];
-  L.push("HERO — karta ratunkowa MediTag " + card.tagId);
-  L.push("Pacjent: " + (p.name||"nieznany") + (a!==null?", "+a+" lat":"") + (p.blood?", grupa "+p.blood+(p.rh||""):""));
-  L.push("Alergie: " + ((card.allergies||[]).map(x=>x.allergen+" ("+SEV[Number(x.severity)||1]+")").join("; ") || "brak zgłoszonych"));
-  L.push("Leki: " + ((card.meds||[]).map(m=>m.name+" "+(m.dose||"")+(m.anticoag?" [ANTYKOAGULANT]":"")).join("; ") || "brak zgłoszonych"));
-  L.push("Choroby: " + ((card.conditions||[]).map(c=>c.name+(c.icd10?" ("+c.icd10+")":"")).join("; ") || "brak zgłoszonych"));
-  if(p.devices) L.push("Wszczepy/urządzenia: " + p.devices);
-  if(p.dnr) L.push("UWAGA: zgłoszone oświadczenie DNR");
-  const k = (card.contacts||[]).find(x=>x.primary) || (card.contacts||[])[0];
-  if(k) L.push("Kontakt: " + k.name + " (" + (k.relation||"") + ") " + k.phone);
-  return L.join("\n");
-}
-
 /** Ratownik ze starą opaską w ręku musi wiedzieć, że trafił na odciętą, a nie na zepsuty serwis. */
 function revokedHTML(tagId, revokedAt){
   return '<div class="notice crit"><span><b>Opaska unieważniona</b>'
@@ -1184,7 +1210,7 @@ function wireHandover(card){
   const b = document.getElementById("copyHand");
   if(!b) return;
   b.addEventListener("click", async () => {
-    try { await navigator.clipboard.writeText(handoverText(card)); toast("Podsumowanie skopiowane"); }
+    try { await navigator.clipboard.writeText(handoverText(card, age((card.person || {}).birthDate))); toast("Podsumowanie skopiowane"); }
     catch(err){ toast("Przeglądarka zablokowała schowek"); }
   });
 }
@@ -1757,10 +1783,10 @@ function printHTML(card){
     : '<p class="small muted">' + esc(pusto) + '</p>';
   const sekcja = (tytul, tresc) => '<section><h4>' + esc(tytul) + '</h4>' + tresc + '</section>';
 
-  const alergie = (c.allergies || []).slice().sort((x, y) => y.severity - x.severity)
+  const alergie = roAllergies(c)
     .map(x => '<span class="' + (Number(x.severity) >= 3 ? "waga" : "") + '">' + esc(x.allergen) + '</span> — '
       + esc(SEV[Number(x.severity) || 1]) + (x.reaction ? ', ' + esc(x.reaction) : ""));
-  const leki = (c.meds || []).slice().sort((x, y) => (y.anticoag ? 1 : 0) - (x.anticoag ? 1 : 0))
+  const leki = roMeds(c)
     .map(m => '<span class="' + (m.anticoag ? "waga" : "") + '">' + esc(m.name) + '</span> '
       + esc([m.dose, m.freq].filter(Boolean).join(", ")) + (m.anticoag ? ' — ANTYKOAGULANT' : ""));
   const choroby = (c.conditions || []).map(x => esc(x.name) + (x.icd10 ? ' (' + esc(x.icd10) + ')' : "")
