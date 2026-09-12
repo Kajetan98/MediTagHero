@@ -35,11 +35,22 @@ jobs:
       # public/index.html jest w repozytorium, ale budujemy je jeszcze raz, żeby na stronie
       # nie wylądowała wersja rozjechana z web/app.html.
       - run: npm run build
-      - uses: actions/configure-pages@v5
+      # Token przepływu nie zawsze ma prawo włączyć Pages w repozytorium. Gdy nie ma, nie wywracamy
+      # przebiegu na czerwono — wypisujemy, co kliknąć, i pomijamy wdrożenie do następnego razu.
+      - id: pages
+        uses: actions/configure-pages@v5
+        continue-on-error: true
         with:
           enablement: true
-      - uses: actions/upload-pages-artifact@v3
+      - if: steps.pages.outcome != 'success'
+        run: |
+          echo "::warning::GitHub Pages nie jest włączone dla tego repozytorium, więc nie ma dokąd wystawić strony."
+          echo "Włącza się je raz: Settings → Pages → Build and deployment → Source: GitHub Actions."
+          echo "Potem wystarczy uruchomić ten przepływ ponownie (Actions → strona → Run workflow)."
+      - if: steps.pages.outcome == 'success'
+        uses: actions/upload-pages-artifact@v3
         with:
           path: public
       - id: wdrozenie
+        if: steps.pages.outcome == 'success'
         uses: actions/deploy-pages@v4
