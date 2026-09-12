@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 import { networkInterfaces } from "node:os";
 import { join, normalize, extname, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { openDatabase, READ_CTX } from "./db.js";
+import { openDatabase, READ_CTX, readCtxFor, CARRIER_KIND } from "./db.js";
 import { DoctorStore } from "./doctors.js";
 import { rateLimiter } from "./limit.js";
 
@@ -103,7 +103,10 @@ export function createServer(store = openDatabase(),
     }
 
     try {
-      const doctor = () => store.doctors.bySession(req.headers["x-hero-doctor"]);
+      /* Konto zawodowe z tokenu: lekarz albo ratownik. Otwiera pełną kartę do odczytu. */
+      const konto = () => store.doctors.bySession(req.headers["x-hero-doctor"]);
+      /* Podpis pod wpisem bierze się wyłącznie z konta lekarza — ratownik karty nie redaguje. */
+      const doctor = () => { const k = konto(); return k && k.role === "lekarz" ? k : null; };
 
       if (path === "/api/health") {
         return send(res, 200, { service: "hero", version: 2, cards: store.cards.count(), doctors: store.doctors.count() });
@@ -129,22 +132,41 @@ export function createServer(store = openDatabase(),
         return fail(res, 405, "Nieobsługiwana metoda");
       }
       if (path === "/api/doctors/me" && req.method === "GET") {
-        const kto = doctor();
+        const kto = konto();
         return kto ? send(res, 200, { ...kto, sessions: store.doctors.sessions(kto.id) })
-                   : fail(res, 403, "Nieznana albo wygasła sesja lekarza");
+                   : fail(res, 403, "Nieznana albo wygasła sesja konta");
       }
       if (path === "/api/doctors/sessions" && req.method === "DELETE") {
-        const kto = doctor();
-        if (!kto) return fail(res, 403, "Nieznana albo wygasła sesja lekarza");
+        const kto = konto();
+        if (!kto) return fail(res, 403, "Nieznana albo wygasła sesja konta");
         store.doctors.logoutAll(kto.id);
         return send(res, 204);
       }
 
-      const m = path.match(/^\/api\/cards\/([^/]+)(\/session|\/reads|\/revoke|\/move|\/pin)?$/);
+      /**
+       * Identyfikator nośnika → karta. Nośnik (opaska, brelok, karta do portfela) wskazuje na kartę,
+       * a odczyt idzie po nim tak samo jak po adresie własnym karty. Ścieżki na PIN-ie rozwiązania
+       * nie używają: skrót PIN-u wiąże się z adresem własnym karty, więc pacjent podaje ten adres.
+       */
+      const tagi = path.match(/^\/api\/tags\/([^/]+)$/);
+      if (tagi) {
+        if (req.method !== "GET") return fail(res, 405, "Nieobsługiwana metoda");
+        const nosnik = tagi[1].toUpperCase();
+        if (!TAG.test(nosnik)) return fail(res, 400, "Nieprawidłowy identyfikator nośnika");
+        const r = store.cards.resolve(nosnik);
+        if (!r) return fail(res, 404, "Ten identyfikator nie prowadzi do żadnej karty");
+        const odciety = (r.carrier && r.carrier.revokedAt) || store.cards.revokedAt(r.cardId);
+        /* Sam rodzaj nośnika, bez opisu nadanego przez pacjenta: opis potrafi nieść imię. */
+        return send(res, 200, { tagId: r.cardId, kind: r.carrier ? r.carrier.kind : CARRIER_KIND[0],
+          revoked: !!odciety, revokedAt: odciety || null });
+      }
+
+      const m = path.match(/^\/api\/cards\/([^/]+)(\/session|\/reads|\/revoke|\/pin|\/carriers(?:\/([^/]+))?)?$/);
       if (!m) return fail(res, 404, "Nieznany zasób");
 
       const tagId = m[1].toUpperCase();
       const sub = m[2];
+      const podrzedny = m[3] ? m[3].toUpperCase() : null;
       if (!TAG.test(tagId)) return fail(res, 400, "Nieprawidłowy identyfikator opaski");
 
       /* Limit prób PIN-u liczony osobno dla pary adres–opaska; poprawny PIN kasuje licznik. */
@@ -178,14 +200,23 @@ export function createServer(store = openDatabase(),
         const out = afterPin(store.cards.changePin(tagId, req.headers["x-hero-pin"], body.pinHash));
         return out.error ? fail(res, out.status, out.error) : send(res, 204);
       }
-      if (sub === "/move") {
-        if (req.method !== "POST") return fail(res, 405, "Nieobsługiwana metoda");
+      /* Nośniki tej samej karty: druga opaska, brelok, karta do portfela. Wszystko na PIN-ie karty,
+         bo dodanie nośnika to wydanie kolejnego klucza do zestawu ratunkowego. */
+      if (sub && sub.startsWith("/carriers")) {
         if (pins.blocked(pinKey)) return fail(res, 429, "Za dużo prób PIN-u do tej karty");
-        const body = await readJson(req);
-        const nowy = str(body.tagId).toUpperCase();
-        if (!TAG.test(nowy)) return fail(res, 400, "Nieprawidłowy identyfikator nowej opaski");
-        const out = afterPin(store.cards.move(tagId, req.headers["x-hero-pin"], nowy, body.pinHash));
-        return out.error ? fail(res, out.status, out.error) : send(res, out.status, out.card);
+        if (!podrzedny && req.method === "POST") {
+          const body = await readJson(req);
+          const nowy = str(body.tagId).toUpperCase();
+          if (!TAG.test(nowy)) return fail(res, 400, "Nieprawidłowy identyfikator nośnika");
+          const out = afterPin(store.cards.addCarrier(tagId, req.headers["x-hero-pin"],
+            { tagId: nowy, kind: body.kind, label: body.label }));
+          return out.error ? fail(res, out.status, out.error) : send(res, out.status, out.carriers);
+        }
+        if (podrzedny && req.method === "DELETE") {
+          const out = afterPin(store.cards.revokeCarrier(tagId, req.headers["x-hero-pin"], podrzedny));
+          return out.error ? fail(res, out.status, out.error) : send(res, 200, out.carriers);
+        }
+        return fail(res, 405, "Nieobsługiwana metoda");
       }
 
       if (sub === "/reads") {
@@ -193,25 +224,48 @@ export function createServer(store = openDatabase(),
         /* Adres jest tym, co widzi proces; za reverse proxy trzeba go tam ograniczyć. Limit idzie
            przed sprawdzeniem unieważnienia, żeby stan opaski nie dał się wypytywać bez ograniczeń. */
         if (!reads.allow(req.socket.remoteAddress || "?")) return fail(res, 429, "Za dużo odczytów z tego adresu");
-        /* Unieważniona opaska nie ma czego pokazać, więc nie ma też czego zapisać w historii. */
-        const uniewazniona = store.cards.revokedAt(tagId);
-        if (uniewazniona) return send(res, 410, { error: "Opaska unieważniona", revokedAt: uniewazniona });
+        /* Unieważniony nośnik nie ma czego pokazać, więc nie ma też czego zapisać w historii. */
+        const cel = store.cards.resolve(tagId);
+        if (!cel) return fail(res, 404, "Nie ma karty o tym identyfikatorze");
+        const uniewazniona = (cel.carrier && cel.carrier.revokedAt) || store.cards.revokedAt(cel.cardId);
+        if (uniewazniona) return send(res, 410, { error: "Nośnik unieważniony", revokedAt: uniewazniona });
         const body = await readJson(req);
-        /* Dostęp lekarza opisuje jego konto, nie pole z formularza — i tylko konto może go zapisać. */
-        const kto = doctor();
-        if (body.ctx === READ_CTX[1] && !kto) return fail(res, 403, "Wpis o dostępie lekarza wymaga konta lekarza");
+        /* Dostęp zawodowy opisuje konto, nie pole z formularza — i tylko konto może go zapisać. */
+        const kto = konto();
+        if (!kto && READ_CTX.slice(1).includes(str(body.ctx))) {
+          return fail(res, 403, "Wpis o dostępie zawodowym wymaga konta lekarza albo ratownika");
+        }
         const entry = kto
-          ? store.cards.addRead(tagId, DoctorStore.label(kto), READ_CTX[1])
-          : store.cards.addRead(tagId, body.by, body.ctx);
+          ? store.cards.addRead(cel.cardId, DoctorStore.label(kto), readCtxFor(kto.role))
+          : store.cards.addRead(cel.cardId, body.by, body.ctx);
         return entry ? send(res, 201, entry) : fail(res, 404, "Nie ma karty o tym identyfikatorze");
       }
 
       if (req.method === "GET") {
-        const card = store.cards.publicCard(tagId);
+        /**
+         * Dwa poziomy odczytu. Bez konta wychodzi sam zestaw ratunkowy: to, co ratuje życie, bez
+         * nazwiska, daty urodzenia i kontaktów alarmowych — bo identyfikator opaski ma każdy, kto ją
+         * znalazł. Konto zawodowe (lekarz albo ratownik) dostaje kartę w całości, a jego odczyt
+         * zapisuje się w historii z nazwiskiem i numerem: nie da się zajrzeć bez śladu.
+         */
+        const kto = konto();
+        const cel = store.cards.resolve(tagId);
+        if (!cel) return fail(res, 404, "Nie ma karty o tym identyfikatorze");
+        const card = kto ? store.cards.fullCard(cel.cardId) : store.cards.rescueCard(cel.cardId);
         if (!card) return fail(res, 404, "Nie ma karty o tym identyfikatorze");
-        /* Stary adres mówi, że opaska jest odcięta. Ratownik ma wiedzieć, że trafił na unieważnioną
-           opaskę, a nie na zepsuty serwis — dlatego 410, nie 404. */
-        if (card.revokedAt) return send(res, 410, { error: "Opaska unieważniona", revokedAt: card.revokedAt });
+        /* Unieważniony nośnik i odcięta karta odpowiadają tak samo: ratownik ma wiedzieć, że trafił
+           na coś odciętego, a nie na zepsuty serwis — dlatego 410, nie 404. */
+        const odciety = (cel.carrier && cel.carrier.revokedAt) || card.revokedAt;
+        if (odciety) return send(res, 410, { error: "Nośnik unieważniony", revokedAt: odciety });
+        /* Rodzaj nośnika, którym otwarto kartę — z niego bierze się opis odczytu w historii. Opis
+           nadany przez pacjenta wychodzi dopiero z kontem: potrafi nieść imię. */
+        if (cel.carrier) card.carrier = kto ? cel.carrier : { tagId: cel.carrier.tagId, kind: cel.carrier.kind };
+        if (kto) {
+          /* Ten sam licznik co przy zapisie śladu: wgląd w karty też nie może lecieć bez końca. */
+          if (!reads.allow(req.socket.remoteAddress || "?")) return fail(res, 429, "Za dużo odczytów z tego adresu");
+          store.cards.addRead(cel.cardId, DoctorStore.label(kto), readCtxFor(kto.role));
+          card.reads = store.cards.reads(cel.cardId);
+        }
         return send(res, 200, card);
       }
       if (req.method === "PUT") {

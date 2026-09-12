@@ -1,0 +1,26 @@
+# Render — z tego katalogu najprostsza droga bez komputera: wszystko robi się w przeglądarce.
+# Render szuka pliku `render.yaml` w katalogu głównym repozytorium, więc najpierw skopiuj go tam
+# (na telefonie: GitHub → Add file → Create new file → nazwa `render.yaml` → wklej tę treść).
+# Potem w Render: Dashboard → New → Blueprint → wskaż to repozytorium.
+#
+# Co daje: HTTPS pod adresem *.onrender.com od razu (Web NFC tego wymaga), dysk, który przeżywa
+# restart i wdrożenie, automatyczne wdrożenie po każdym pushu.
+# Czego nie daje: darmowy plan usypia usługę po kwadransie bez ruchu — pierwsze zbliżenie opaski
+# po przerwie czeka wtedy kilkadziesiąt sekund. Do realnego ratownictwa trzeba płatnego planu.
+
+services:
+  - type: web
+    name: hero
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    plan: starter          # „free" też zadziała, ale usypia; dysku free nie ma wcale
+    healthCheckPath: /api/health
+    envVars:
+      - key: HERO_DB
+        value: /data/hero.sqlite
+      # Render narzuca port własną zmienną PORT i serwer ją czyta.
+    disk:
+      name: hero-data
+      mountPath: /data
+      sizeGB: 1

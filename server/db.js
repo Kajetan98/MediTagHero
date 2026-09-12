@@ -7,7 +7,18 @@ import { DoctorStore } from "./doctors.js";
 
 const SECTIONS = ["allergies", "meds", "conditions", "contacts"];
 const READ_LIMIT = 200;
-export const READ_CTX = ["odczyt ratunkowy", "dostęp lekarza"];
+export const READ_CTX = ["odczyt ratunkowy", "dostęp lekarza", "dostęp ratownika"];
+/** Kontekst wpisu w historii dla konta danej roli. */
+export const readCtxFor = rola => (rola === "ratownik" ? READ_CTX[2] : READ_CTX[1]);
+/**
+ * Rodzaje nośnika. Opaska trafia do osób starszych i do dzieci, brelok do kluczy — do wszystkich,
+ * którzy opaski nie założą, karta do portfela zostaje jako zapas bez elektroniki. Wszystkie niosą
+ * ten sam adres tej samej karty; rodzaj zmienia tylko nazwy na ekranie i to, czego pacjent szuka,
+ * gdy jeden z nich zgubi.
+ */
+export const CARRIER_KIND = ["opaska", "brelok", "karta"];
+/** Więcej nośników niż tyle nikt nie nosi, a każdy to kolejny klucz do zestawu ratunkowego. */
+const CARRIER_LIMIT = 10;
 
 export function openDatabase(file = process.env.HERO_DB || "data/hero.sqlite") {
   if (file !== ":memory:") mkdirSync(dirname(file), { recursive: true });
@@ -24,6 +35,15 @@ export function openDatabase(file = process.env.HERO_DB || "data/hero.sqlite") {
       updated_by TEXT NOT NULL DEFAULT 'pacjent',
       revoked_at TEXT
     );
+    CREATE TABLE IF NOT EXISTS carriers (
+      tag_id     TEXT PRIMARY KEY,
+      card_id    TEXT NOT NULL REFERENCES cards(tag_id) ON DELETE CASCADE,
+      kind       TEXT NOT NULL DEFAULT 'opaska',
+      label      TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL,
+      revoked_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS carriers_by_card ON carriers(card_id, created_at);
     CREATE TABLE IF NOT EXISTS reads (
       id     TEXT PRIMARY KEY,
       tag_id TEXT NOT NULL REFERENCES cards(tag_id) ON DELETE CASCADE,
@@ -37,7 +57,8 @@ export function openDatabase(file = process.env.HERO_DB || "data/hero.sqlite") {
       pwz        TEXT NOT NULL UNIQUE,
       name       TEXT NOT NULL,
       pass       TEXT NOT NULL,
-      created_at TEXT NOT NULL
+      created_at TEXT NOT NULL,
+      role       TEXT NOT NULL DEFAULT 'lekarz'
     );
     CREATE TABLE IF NOT EXISTS doctor_sessions (
       token      TEXT PRIMARY KEY,
@@ -49,6 +70,14 @@ export function openDatabase(file = process.env.HERO_DB || "data/hero.sqlite") {
      istniejącej tabeli nie rusza, więc bez tego zapis do revoked_at wywracałby zapytania. */
   const kolumny = db.prepare("PRAGMA table_info(cards)").all().map(r => r.name);
   if (!kolumny.includes("revoked_at")) db.exec("ALTER TABLE cards ADD COLUMN revoked_at TEXT");
+  /* To samo dla roli konta: bazy sprzed kont ratowników znają wyłącznie lekarzy. */
+  const koloD = db.prepare("PRAGMA table_info(doctors)").all().map(r => r.name);
+  if (!koloD.includes("role")) db.exec("ALTER TABLE doctors ADD COLUMN role TEXT NOT NULL DEFAULT 'lekarz'");
+  /* Karta założona przed rejestrem nośników ma jeden nośnik: swój własny adres. Bez tego wiersza
+     jej opaska działałaby dalej (patrz `resolve`), ale pacjent nie miałby czego unieważnić osobno. */
+  db.exec(`INSERT INTO carriers (tag_id, card_id, kind, label, created_at, revoked_at)
+           SELECT tag_id, tag_id, 'opaska', '', updated_at, revoked_at FROM cards
+           WHERE tag_id NOT IN (SELECT tag_id FROM carriers)`);
   return {
     cards: new CardStore(db),
     doctors: new DoctorStore(db),
@@ -58,6 +87,25 @@ export function openDatabase(file = process.env.HERO_DB || "data/hero.sqlite") {
 
 const str = v => (typeof v === "string" ? v : v == null ? "" : String(v));
 const arr = v => (Array.isArray(v) ? v : []);
+
+/**
+ * Wiek w latach. Liczy go serwer, bo w zestawie ratunkowym ma być wiek (potrzebny do dawkowania),
+ * a nie data urodzenia (która identyfikuje pacjenta).
+ */
+function ageYears(birthDate) {
+  const d = new Date(str(birthDate));
+  if (Number.isNaN(d.getTime())) return null;
+  const teraz = new Date();
+  let lat = teraz.getFullYear() - d.getFullYear();
+  const m = teraz.getMonth() - d.getMonth();
+  if (m < 0 || (m === 0 && teraz.getDate() < d.getDate())) lat--;
+  return lat >= 0 && lat < 130 ? lat : null;
+}
+
+const carrierShape = row => ({
+  tagId: row.tag_id, kind: row.kind, label: row.label,
+  createdAt: row.created_at, revokedAt: row.revoked_at || null,
+});
 
 /** Porównanie treści wpisu niezależne od kolejności kluczy w JSON-ie. */
 const canon = v => {
@@ -70,20 +118,118 @@ const same = (a, b) => JSON.stringify(canon(a)) === JSON.stringify(canon(b));
 class CardStore {
   constructor(db) { this.db = db; }
 
-  /** Zestaw jawny: dokładnie to, co ratownik widzi po zbliżeniu opaski. */
-  publicCard(tagId) {
+  /**
+   * Karta z bazy, bez historii odczytów. Wewnętrzna: w tej postaci nie wychodzi poza serwer,
+   * bo niesie nazwisko, datę urodzenia i kontakty alarmowe.
+   */
+  storedCard(tagId) {
     const row = this.db.prepare("SELECT * FROM cards WHERE tag_id = ?").get(tagId);
     if (!row) return null;
     return { tagId: row.tag_id, demo: !!row.demo, updatedAt: row.updated_at, updatedBy: row.updated_by,
       revokedAt: row.revoked_at || null, ...JSON.parse(row.data) };
   }
 
-  /** Pełna karta wraz z historią odczytów — tylko po weryfikacji PIN-u. */
+  /**
+   * Zestaw ratunkowy: wszystko, co pozwala uratować życie, i nic, co mówi, kim pacjent jest.
+   * To jedyna postać karty, jaką serwer oddaje bez konta zawodowego — bo sam identyfikator
+   * opaski ma każdy, kto ją podniósł z chodnika.
+   *
+   * Wchodzi: grupa krwi, masa, wiek (nie data urodzenia), języki kontaktu, wszczepy, uwagi dla
+   * zespołu, DNR i zgoda na pobranie narządów, wszystkie alergie, leki przeciwkrzepliwe oraz
+   * rozpoznania poza przebytymi.
+   *
+   * Nie wchodzi: nazwisko, data urodzenia, kontakty alarmowe (to dane osób trzecich), leki inne niż
+   * przeciwkrzepliwe, rozpoznania przebyte, historia odczytów.
+   */
+  rescueCard(tagId) {
+    const card = this.storedCard(tagId);
+    if (!card) return null;
+    const p = card.person && typeof card.person === "object" ? card.person : {};
+    return {
+      tagId: card.tagId,
+      rescue: true,
+      person: {
+        blood: str(p.blood), rh: str(p.rh), weightKg: str(p.weightKg), heightCm: str(p.heightCm),
+        langs: str(p.langs), devices: str(p.devices), note: str(p.note),
+        dnr: !!p.dnr, donor: !!p.donor, ageYears: ageYears(p.birthDate),
+      },
+      allergies: arr(card.allergies),
+      meds: arr(card.meds).filter(m => m && m.anticoag),
+      /* Odpada tylko to, co minęło. Rozpoznanie kontrolowane albo bez statusu zostaje: cukrzyca
+         „kontrolowana" decyduje przy nieprzytomnym tak samo jak „aktywna", a brak pola nie jest
+         powodem, żeby coś przed ratownikiem ukryć. Ta sama reguła co w `critical()` w aplikacji. */
+      conditions: arr(card.conditions).filter(c => c && str(c.status) !== "przebyta"),
+      updatedAt: card.updatedAt, updatedBy: card.updatedBy, revokedAt: card.revokedAt,
+    };
+  }
+
+  /**
+   * Pełna karta wraz z historią odczytów i listą nośników — dla konta zawodowego albo po PIN-ie
+   * pacjenta. Lista nośników nie wychodzi w zestawie ratunkowym: kto podniósł brelok z chodnika,
+   * nie ma się z niego dowiedzieć, jakie jeszcze identyfikatory prowadzą do tej samej karty.
+   */
   fullCard(tagId) {
-    const card = this.publicCard(tagId);
+    const card = this.storedCard(tagId);
     if (!card) return null;
     card.reads = this.reads(tagId);
+    card.carriers = this.carriers(tagId);
     return card;
+  }
+
+  /* ---------------- nośniki ---------------- */
+
+  /**
+   * Identyfikator z nośnika → karta, do której prowadzi. Karta ma jeden adres własny (`tag_id`),
+   * ten sam przez całe życie karty, bo z nim wiąże się skrót PIN-u (`hero:<tag>:<pin>`), i dowolną
+   * liczbę nośników wskazujących na nią. Adres własny jest zarazem pierwszym nośnikiem.
+   * Zwraca `null`, gdy identyfikator nie prowadzi nigdzie.
+   */
+  resolve(tagId) {
+    const row = this.db.prepare("SELECT * FROM carriers WHERE tag_id = ?").get(tagId);
+    if (row) return { cardId: row.card_id, carrier: carrierShape(row) };
+    /* Karta z bazy sprzed migracji, gdyby wiersz nośnika nie powstał: adres własny wystarcza. */
+    if (this.has(tagId)) return { cardId: tagId, carrier: null };
+    return null;
+  }
+
+  carriers(cardId) {
+    return this.db.prepare("SELECT * FROM carriers WHERE card_id = ? ORDER BY created_at").all(cardId)
+      .map(carrierShape);
+  }
+
+  /**
+   * Nowy nośnik tej samej karty: druga opaska, brelok do kluczy, karta do portfela. Skrótu PIN-u
+   * nie trzeba przeliczać, bo adres własny karty się nie zmienia — nośnik tylko na nią wskazuje.
+   */
+  addCarrier(cardId, digest, { tagId, kind, label } = {}) {
+    if (!this.has(cardId)) return { status: 404, error: "Nie ma karty o tym identyfikatorze" };
+    if (!this.checkPin(cardId, digest)) return { status: 403, error: "Nieprawidłowy PIN karty" };
+    const nowy = str(tagId).toUpperCase();
+    if (!nowy) return { status: 400, error: "Nowy nośnik wymaga identyfikatora" };
+    if (this.has(nowy) || this.db.prepare("SELECT 1 FROM carriers WHERE tag_id = ?").get(nowy)) {
+      return { status: 409, error: "Ten identyfikator jest już zajęty" };
+    }
+    const ile = this.db.prepare("SELECT COUNT(*) AS n FROM carriers WHERE card_id = ? AND revoked_at IS NULL").get(cardId).n;
+    if (ile >= CARRIER_LIMIT) return { status: 409, error: `Karta ma już ${CARRIER_LIMIT} czynnych nośników` };
+    this.db.prepare("INSERT INTO carriers (tag_id, card_id, kind, label, created_at) VALUES (?, ?, ?, ?, ?)")
+      .run(nowy, cardId, CARRIER_KIND.includes(str(kind)) ? str(kind) : CARRIER_KIND[0], str(label).slice(0, 60), new Date().toISOString());
+    return { status: 201, carriers: this.carriers(cardId) };
+  }
+
+  /**
+   * Unieważnienie jednego nośnika. Wiersz zostaje jako nagrobek — pod tym identyfikatorem ratownik
+   * ma zobaczyć „nośnik unieważniony", a nie „nie ma takiej karty". Karta i pozostałe nośniki
+   * działają dalej. Operacji nie da się cofnąć.
+   */
+  revokeCarrier(cardId, digest, tagId) {
+    if (!this.has(cardId)) return { status: 404, error: "Nie ma karty o tym identyfikatorze" };
+    if (!this.checkPin(cardId, digest)) return { status: 403, error: "Nieprawidłowy PIN karty" };
+    const row = this.db.prepare("SELECT * FROM carriers WHERE tag_id = ? AND card_id = ?").get(str(tagId).toUpperCase(), cardId);
+    if (!row) return { status: 404, error: "Ta karta nie ma takiego nośnika" };
+    if (!row.revoked_at) {
+      this.db.prepare("UPDATE carriers SET revoked_at = ? WHERE tag_id = ?").run(new Date().toISOString(), row.tag_id);
+    }
+    return { status: 200, carriers: this.carriers(cardId) };
   }
 
   /**
@@ -140,9 +286,14 @@ class CardStore {
     const exists = this.has(tagId);
     if (exists && !this.checkPin(tagId, digest)) return { status: 403, error: "Nieprawidłowy PIN karty" };
     if (!exists && !body.pinHash) return { status: 400, error: "Nowa karta wymaga pola pinHash" };
+    /* Identyfikator zajęty przez nośnik cudzej karty nie może założyć karty własnej: prowadziłby
+       wtedy w dwa miejsca naraz. */
+    if (!exists && this.db.prepare("SELECT 1 FROM carriers WHERE tag_id = ?").get(tagId)) {
+      return { status: 409, error: "Ten identyfikator należy już do nośnika innej karty" };
+    }
 
     const person = body.person && typeof body.person === "object" ? body.person : {};
-    const prev = exists ? this.publicCard(tagId) : null;
+    const prev = exists ? this.storedCard(tagId) : null;
     const now = new Date().toISOString();
     const data = { person, ...Object.fromEntries(SECTIONS.map(k =>
       [k, trusted ? arr(body[k]) : this.#signEntries(k, arr(body[k]), prev, doctor, now)])) };
@@ -156,6 +307,11 @@ class CardStore {
     } else {
       this.db.prepare("INSERT INTO cards (tag_id, name, pin, data, demo, updated_at, updated_by) VALUES (?, ?, ?, ?, ?, ?, ?)")
         .run(tagId, str(person.name), hashSecret(body.pinHash), payload, trusted && body.demo ? 1 : 0, now, updatedBy);
+      /* Adres własny nowej karty jest zarazem jej pierwszym nośnikiem. Rodzaj wybiera pacjent przy
+         zakładaniu karty: opaska, brelok do kluczy albo karta do portfela. */
+      const n = body.carrier && typeof body.carrier === "object" ? body.carrier : {};
+      this.db.prepare("INSERT INTO carriers (tag_id, card_id, kind, label, created_at) VALUES (?, ?, ?, ?, ?)")
+        .run(tagId, tagId, CARRIER_KIND.includes(str(n.kind)) ? str(n.kind) : CARRIER_KIND[0], str(n.label).slice(0, 60), now);
     }
     return { status: exists ? 200 : 201, card: this.fullCard(tagId) };
   }
@@ -180,10 +336,10 @@ class CardStore {
   }
 
   /**
-   * Unieważnienie zgubionej opaski. Adres zostaje w bazie jako nagrobek: stary identyfikator ma
-   * odpowiadać „opaska unieważniona", a nie „nie ma takiej karty" — ratownik, który zbliżył starą
-   * opaskę, musi wiedzieć, że trafił na odciętą, a nie na zepsuty serwis. Treść karty zostaje,
-   * bo pacjent otwiera ją dalej PIN-em i może przenieść na nową opaskę. Operacji nie da się cofnąć.
+   * Odcięcie całej karty: żaden nośnik nie oddaje jej już do odczytu. Adres zostaje w bazie jako
+   * nagrobek — ratownik, który zbliżył opaskę, ma zobaczyć „unieważniona", a nie „nie ma takiej
+   * karty". Treść karty zostaje, bo pacjent otwiera ją dalej PIN-em. Operacji nie da się cofnąć.
+   * Zgubiony jeden nośnik to `revokeCarrier`, nie to.
    */
   revoke(tagId, digest) {
     if (!this.has(tagId)) return { status: 404, error: "Nie ma karty o tym identyfikatorze" };
@@ -193,28 +349,6 @@ class CardStore {
     const at = new Date().toISOString();
     this.db.prepare("UPDATE cards SET revoked_at = ? WHERE tag_id = ?").run(at, tagId);
     return { status: 200, revokedAt: at };
-  }
-
-  /**
-   * Przeniesienie karty na nową opaskę. Skrót PIN-u wiąże się z identyfikatorem opaski
-   * (`hero:<tag>:<pin>`), więc nowy adres wymaga skrótu przeliczonego przez przeglądarkę dla nowego
-   * identyfikatora — samym starym skrótem karty nie da się przepisać. Stary wpis zostaje jako
-   * nagrobek: bez treści i nazwiska, z historią odczytów, która dotyczy tamtej opaski.
-   */
-  move(tagId, digest, nowy, pinHash) {
-    if (!this.has(tagId)) return { status: 404, error: "Nie ma karty o tym identyfikatorze" };
-    if (!this.checkPin(tagId, digest)) return { status: 403, error: "Nieprawidłowy PIN karty" };
-    if (!pinHash) return { status: 400, error: "Nowa opaska wymaga pola pinHash" };
-    if (nowy === tagId) return { status: 409, error: "Nowa opaska ma ten sam identyfikator" };
-    if (this.has(nowy)) return { status: 409, error: "Karta o tym identyfikatorze już istnieje" };
-
-    const row = this.db.prepare("SELECT * FROM cards WHERE tag_id = ?").get(tagId);
-    const now = new Date().toISOString();
-    this.db.prepare("INSERT INTO cards (tag_id, name, pin, data, demo, updated_at, updated_by) VALUES (?, ?, ?, ?, 0, ?, ?)")
-      .run(nowy, row.name, hashSecret(pinHash), row.data, now, row.updated_by);
-    this.db.prepare("UPDATE cards SET revoked_at = ?, data = ?, name = '' WHERE tag_id = ?")
-      .run(now, JSON.stringify({ person: {} }), tagId);
-    return { status: 201, card: this.fullCard(nowy) };
   }
 
   remove(tagId, digest) {

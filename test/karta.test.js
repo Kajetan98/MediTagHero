@@ -6,13 +6,21 @@ import { runInNewContext } from "node:vm";
 /**
  * Zawartość odczytu ratunkowego. To jedyne miejsce, które decyduje, co ratownik zobaczy na miejscu
  * zdarzenia i w jakiej kolejności — dlatego jest wycięte z web/app.html jako osobny blok i sprawdzane
- * bez przeglądarki. Serwer tego nie filtruje: `GET /api/cards/:tag` oddaje kartę w całości.
+ * bez przeglądarki. Ten sam blok opisuje zestaw ratunkowy, czyli zakres, jaki `GET /api/cards/:tag`
+ * wydaje bez konta zawodowego — serwer liczy go sam, w `rescueCard`.
  */
 const src = readFileSync(new URL("../web/app.html", import.meta.url), "utf8");
 const blok = src.match(/\/\* KARTA:START[\s\S]*?\/\* KARTA:END \*\//);
 assert.ok(blok, "w web/app.html nie ma bloku KARTA:START … KARTA:END");
-const { critical, roAllergies, roMeds, roFlags, handoverText } = runInNewContext(
-  "(function(){" + blok[0] + "\nreturn {critical, roAllergies, roMeds, roFlags, handoverText};})()");
+/* `rescueOf` liczy wiek helperem `age` z tego samego pliku — bierzemy go stąd, żeby test nie
+   dublował logiki obliczania wieku. */
+const ageSrc = src.match(/^const age = .*$/m);
+assert.ok(ageSrc, "w web/app.html nie ma helpera age");
+/* Napisy przechodzą przez `t()`/`tf()`. Tutaj sprawdzamy wersję polską, czyli zachowanie bez
+   tłumaczenia; pokrycie słownika angielskiego pilnuje test/i18n.test.js. */
+const stubJezyka = 'const t = x => x; const tf = (pl, ...w) => pl.replace(/\\{(\\d)\\}/g, (_, i) => w[Number(i)]);';
+const { critical, rescueOf, roAllergies, roMeds, roFlags, handoverText } = runInNewContext(
+  "(function(){" + stubJezyka + "\n" + ageSrc[0] + "\n" + blok[0] + "\nreturn {critical, rescueOf, roAllergies, roMeds, roFlags, handoverText};})()");
 
 const karta = () => ({
   tagId: "HERO-2481-KX",
@@ -48,6 +56,39 @@ test("zestaw krytyczny zdejmuje rozpoznania przebyte i historię odczytów", () 
   assert.equal(c.tagId, "HERO-2481-KX");
   assert.equal(c.person.name, "Anna Wiśniewska");
   assert.deepEqual(Array.from(critical({ tagId: "X" }).conditions, x => x), [], "karta bez sekcji nie wywraca odczytu");
+});
+
+test("zestaw ratunkowy zdejmuje dane identyfikujące, zostawia to, co ratuje", () => {
+  const r = rescueOf(karta());
+  assert.equal(r.rescue, true);
+  assert.equal(r.person.name, undefined, "nazwisko nie wychodzi bez konta");
+  assert.equal(r.person.birthDate, undefined, "data urodzenia identyfikuje pacjenta");
+  assert.equal(r.contacts, undefined, "kontaktów alarmowych nie ma w zestawie ratunkowym");
+  assert.equal(r.reads, undefined, "historii odczytów też nie");
+  assert.equal(r.person.blood + r.person.rh, "A+");
+  assert.equal(r.person.devices, "Stymulator serca Medtronic", "wszczep zostaje — zmienia decyzje");
+  assert.equal(r.person.donor, true);
+  assert.equal(typeof r.person.ageYears, "number", "sam wiek zostaje, bo nie wskazuje osoby");
+
+  assert.deepEqual(Array.from(r.meds, m => m.name), ["Rywaroksaban"],
+    "z leków zostają same antykoagulanty");
+  assert.deepEqual(Array.from(r.conditions, c => c.name), ["Migotanie przedsionków", "Cukrzyca typu 2"],
+    "rozpoznanie przebyte odpada, kontrolowane zostaje");
+  assert.deepEqual(Array.from(roAllergies(r), a => a.allergen), ["Penicylina", "Orzechy ziemne", "Pyłki traw"],
+    "alergie zostają w całości");
+
+  const pusta = rescueOf({ tagId: "HERO-1" });
+  assert.equal(pusta.person.blood, "");
+  assert.deepEqual(Array.from(pusta.meds), []);
+  assert.equal(pusta.person.ageYears, null, "bez daty urodzenia nie ma wieku");
+});
+
+test("podsumowanie z zestawu ratunkowego mówi, że jest niepełne", () => {
+  const t = handoverText(rescueOf(karta()), 58);
+  assert.match(t, /Zakres: zestaw ratunkowy/);
+  assert.match(t, /Pacjent: nieznany, 58 lat, grupa A\+/);
+  assert.doesNotMatch(t, /Kontakt:/, "kontaktu nie ma czego przekazać");
+  assert.doesNotMatch(handoverText(karta(), 58), /Zakres:/, "pełna karta nie potrzebuje adnotacji");
 });
 
 test("alergie idą malejąco po nasileniu", () => {

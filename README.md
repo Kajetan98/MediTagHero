@@ -1,14 +1,18 @@
 # HERO
 
-**HERO — Health Emergency Read Out.** Platforma karty ratunkowej dla opaski NFC **MediTag**.
+**HERO — Health Emergency Read Out.** Platforma karty ratunkowej dla nośników NFC **MediTag**:
+opaski na rękę i breloka do kluczy.
 HERO to nazwa serwisu, MediTag to nazwa produktu noszonego przez pacjenta.
 
 Pacjent i lekarz prowadzą jedną kartę: alergie, przyjmowane leki, choroby przewlekłe, grupa krwi,
-wszczepy, kontakty alarmowe. Ratownik po zbliżeniu telefonu do opaski dostaje zestaw krytyczny
-bez logowania — także wtedy, gdy pacjent jest nieprzytomny. Każdy odczyt zostawia ślad w historii karty.
+wszczepy, kontakty alarmowe. Zbliżenie telefonu do opaski albo breloka otwiera kartę bez logowania — także wtedy,
+gdy pacjent jest nieprzytomny — ale w dwóch różnych zakresach: bez konta wychodzi sam zestaw
+ratunkowy (bez nazwiska i kontaktów), a kartę w całości otwiera konto lekarza albo ratownika
+medycznego. Każdy odczyt zostawia ślad w historii karty.
 
-Opaska nie przechowuje danych medycznych. Tag NFC zawiera wyłącznie adres karty — ten adres
-zapisuje na opasce sama aplikacja, w zakładce „Opaska NFC" karty pacjenta.
+Nośnik nie przechowuje danych medycznych. Tag NFC zawiera wyłącznie adres karty — ten adres
+zapisuje sama aplikacja, w zakładce „Nośniki" karty pacjenta. Jedna karta może mieć kilka nośników
+naraz: opaskę na ręku, brelok przy kluczach, kartę w portfelu.
 
 ## Uruchomienie
 
@@ -19,14 +23,14 @@ flagi `--experimental-sqlite`, której serwer nie ustawia. Projekt nie ma zależ
 npm start          # buduje public/index.html i startuje serwer na :8080
 npm run seed       # przykładowa karta HERO-2481-KX (PIN 1234) i konto lekarza (PWZ 1234567, hasło meditag123)
 npm run cert       # certyfikat samopodpisany do testów po HTTPS (wymaga openssl)
-npm test           # testy API, identyfikatora opaski i kodera QR (node:test)
+npm test           # testy API, identyfikatora nośnika, kodera QR i tłumaczeń (node:test)
 ```
 
 Baza powstaje w `data/hero.sqlite`; ścieżkę zmienia zmienna `HERO_DB`, port — `PORT`.
 
 ### HTTPS
 
-Zapis opaski i skrót PIN-u liczony przez `crypto.subtle` wymagają bezpiecznego kontekstu, a ten poza
+Zapis nośnika i skrót PIN-u liczony przez `crypto.subtle` wymagają bezpiecznego kontekstu, a ten poza
 `localhost` znaczy HTTPS. Serwer nasłuchuje po TLS-ie, gdy dostanie ścieżki do klucza i certyfikatu;
 domyślny port zmienia się wtedy na 8443:
 
@@ -48,7 +52,7 @@ wszystkie źródła zewnętrzne — strona nie wysyła żadnego żądania poza w
 
 ### Z prawdziwą opaską, krok po kroku
 
-Do zapisania opaski potrzebny jest telefon z Androidem, Chrome i włączonym NFC. Telefon i komputer
+Do zapisania nośnika potrzebny jest telefon z Androidem, Chrome i włączonym NFC. Telefon i komputer
 muszą być w tej samej sieci.
 
 1. `npm run cert` — wypisze adres **tego komputera** w sieci lokalnej. Będzie miał postać
@@ -57,9 +61,9 @@ muszą być w tej samej sieci.
    wpisuje się właśnie jego, nigdy `localhost` — `localhost` w telefonie znaczy sam telefon.
 2. `HERO_TLS_KEY=data/tls/key.pem HERO_TLS_CERT=data/tls/cert.pem npm start`
 3. W telefonie otwórz ten adres i przejdź ostrzeżenie o certyfikacie („Zaawansowane" → „Przejdź do…").
-4. „Moja karta" → „Załóż kartę": nazwisko i PIN. Aplikacja od razu otworzy zakładkę „Opaska NFC"
+4. „Moja karta" → „Załóż kartę": nazwisko, PIN i rodzaj nośnika. Aplikacja od razu otworzy zakładkę „Nośniki"
    z adresem tej karty i kodem QR.
-5. „Zapisz kartę na opasce" → przyłóż opaskę do telefonu i przytrzymaj. „Sprawdź, co jest na opasce"
+5. „Zapisz na tym nośniku" → przyłóż opaskę do telefonu i przytrzymaj. „Sprawdź, co jest w nośniku"
    pokaże, co się zapisało.
 6. Zablokuj ekran, zbliż opaskę: telefon otworzy kartę. Na twoim telefonie zapyta o PIN, bo ta
    przeglądarka już tę kartę otwierała; na cudzym pokaże odczyt ratunkowy bez pytania o nic.
@@ -69,14 +73,14 @@ czego otworzyć — bez dźwięku, bez wibracji, bez komunikatu. Brak reakcji na
 telefon albo brelok są zepsute. Anteny NFC w telefonach z Androidem siedzą zwykle w górnej połowie
 pleców, przy aparacie, i brelok trzeba przyłożyć dokładnie tam.
 
-Jeśli „Zapisz kartę na opasce" jest wyszarzone, powód jest jeden z trzech: strona chodzi po `http://`
+Jeśli „Zapisz na tym nośniku" jest wyszarzone, powód jest jeden z trzech: strona chodzi po `http://`
 zamiast `https://`, przeglądarka nie jest Chrome na Androidzie, albo moduł NFC jest wyłączony
 w ustawieniach telefonu. Zostaje wtedy kod QR i zapis adresu dowolną aplikacją do NFC jako rekord
 typu URL.
 
 ### Bez komputera: strona na GitHub Pages
 
-Cała droga wyżej wymaga serwera na własnym komputerze. Do pierwszej opaski wystarczy sam telefon,
+Cała droga wyżej wymaga serwera na własnym komputerze. Do pierwszego nośnika wystarczy sam telefon,
 bo `.github/workflows/strona.yml` wystawia aplikację pod adresem
 <https://kajetan98.github.io/MediTagHero/> — po HTTPS, więc Chrome na Androidzie da tam Web NFC.
 
@@ -89,7 +93,7 @@ gałęzi wystarcza `contents: write`. Samo Pages włączyło się z chwilą poja
 Gałąź `gh-pages` jest wynikiem budowania, nie źródłem: zmiany wprowadza się w `web/app.html`.
 
 Pod tym adresem nie ma API HERO, więc aplikacja schodzi do trybu bez serwera: karta leży w pamięci
-tej przeglądarki, która ją założyła. Do zapisania opaski i odczytania jej tym samym telefonem to
+tej przeglądarki, która ją założyła. Do zapisania nośnika i odczytania go tym samym telefonem to
 wystarcza. Karta odczytana z cudzego telefonu wymaga serwera — opaska zaprowadzi tamten telefon pod
 ten sam adres, ale karty pod nim nie znajdzie.
 
@@ -101,11 +105,23 @@ nie opuszcza tej jednej przeglądarki. W tym trybie działa jako demo i jako Art
 
 | Rola | Czym się uwierzytelnia | Co może |
 |---|---|---|
-| Pacjent | identyfikator opaski + PIN | prowadzi całą kartę, widzi historię odczytów, zmienia PIN, unieważnia opaskę i kasuje kartę |
-| Lekarz | konto z numerem PWZ + identyfikator opaski + PIN pacjenta | ten sam edytor co pacjent, bez usuwania karty; każdy jego wpis niesie nazwisko i numer PWZ |
-| Ratownik | sam identyfikator opaski | odczyt zestawu krytycznego, bez PIN-u; odczyt trafia do historii |
+| Pacjent | identyfikator z nośnika + PIN | prowadzi całą kartę, widzi historię odczytów, zmienia PIN, dodaje i unieważnia nośniki, kasuje kartę |
+| Lekarz | konto z numerem PWZ + identyfikator z nośnika | czyta całą kartę bez PIN-u; PIN pacjenta otwiera ten sam edytor co pacjent, bez usuwania karty; każdy jego wpis niesie nazwisko i numer PWZ |
+| Ratownik medyczny | konto z numerem rejestru + identyfikator z nośnika | czyta całą kartę bez PIN-u; karty nie redaguje i nie podpisuje wpisów |
+| Bez konta | sam identyfikator z nośnika | zestaw ratunkowy: grupa krwi, wiek, alergie, antykoagulanty, rozpoznania nieprzebyte, wszczepy, DNR — bez nazwiska, daty urodzenia, pozostałych leków i kontaktów |
 
-Token sesji lekarza żyje dobę od wydania: dyżur mieści się w całości, a zalogowanie zapomniane na
+Każda rola ma jeszcze zakładkę „Ustawienia": język interfejsu i motyw jasny albo ciemny.
+
+Zakres bez konta wyznacza serwer, w `rescueCard` w `server/db.js`: dane, których w odpowiedzi nie ma,
+nie wychodzą z bazy w ogóle, więc nie da się ich odczytać z ruchu ani z pamięci przeglądarki.
+Aplikacja liczy ten sam zakres jeszcze raz w `rescueOf`, ale tylko na potrzeby trybu bez serwera;
+`test/api.test.js` pilnuje, żeby te dwa opisy się nie rozeszły.
+
+Konto zawodowe nie pyta o PIN, bo pacjent nieprzytomny go nie poda — uprawnieniem jest samo konto,
+a każde otwarcie karty trafia do historii jako „dostęp lekarza" albo „dostęp ratownika", z nazwiskiem
+i numerem. PIN zostaje przy edycji, i po to jest osobne wejście („Otwórz do edycji").
+
+Token sesji konta żyje dobę od wydania: dyżur mieści się w całości, a zalogowanie zapomniane na
 cudzym sprzęcie wygasa do następnego. Pierwsze użycie wygasłego tokenu kasuje go z bazy, a przycisk
 „Wyloguj wszędzie" unieważnia wszystkie tokeny konta naraz.
 
@@ -114,26 +130,75 @@ zachowuje podpis, który już ma, tylko gdy leżał z nim w bazie i nie zmienił
 treści, więc jej zmiana go unieważnia. Wpis nowy albo zmieniony dostaje podpis konta, którym idzie
 zapis, a bez konta schodzi do „pacjent" i traci `signedBy`. Wyjątkiem jest `npm run seed`, który pisze
 do bazy z pominięciem tej reguły, i tryb bez serwera, gdzie konto lekarza leży w pamięci przeglądarki
-i podpis jest tylko etykietą.
+i podpis jest tylko etykietą. Ratownik medyczny wpisów nie podpisuje, bo ich nie dodaje: jego konto
+otwiera kartę do odczytu, a zapis wymaga PIN-u pacjenta i konta lekarza.
 
 Kolejność w odczycie ratunkowym jest celowa: najpierw alergie i anafilaksja, potem leki
 (z wyróżnionymi antykoagulantami), choroby aktywne, wszczepy i uwagi, na końcu kontakt alarmowy.
 
-## Opaska NFC
+## Ustawienia: język i motyw
 
-Opaska nosi jeden rekord NDEF typu URL: adres aplikacji z identyfikatorem karty w kotwicy, na
-przykład `https://hero.example/#/t/HERO-2481-KX`. Trasa siedzi w kotwicy, a nie w ścieżce, bo ten
-sam plik chodzi też poza serwerem HERO. Danych medycznych w opasce nie ma.
+Zakładka „Ustawienia" zbiera dwa wybory, oba zapamiętywane w `localStorage` tej przeglądarki i oba
+z trzecim stanem „idź za urządzeniem":
 
-Zapis robi sama przeglądarka, w karcie pacjenta, w zakładce „Opaska NFC"; zaraz po założeniu karty
-aplikacja otwiera tę zakładkę, bo karta bez opaski jest samym adresem. Obok zapisu są tam jeszcze
-dwie rzeczy: sprawdzenie, co w opasce już leży, i zabezpieczenie jej przed nadpisaniem
+| Ustawienie | Stany | Klucz | Bez wyboru |
+|---|---|---|---|
+| Język | jak w telefonie · Polski · English | `hero.lang.v1` | język przeglądarki |
+| Motyw | jak w systemie · jasny · ciemny | `hero.theme.v1` | `prefers-color-scheme` |
+
+Motyw ustawia atrybut `data-theme` na dokumencie; reguły obu motywów siedzą w arkuszu na górze
+`web/app.html`, a jasny jest domyślny. Ten sam klucz czyta krótki skrypt w treści strony, przed
+resztą aplikacji — bez niego ciemny wybór mrugnąłby jasnym tłem przy każdym otwarciu. Wydruk karty
+do portfela zostaje czarno na białym niezależnie od motywu (`@media print`).
+
+## Język: polski i angielski
+
+Cały interfejs jest dwujęzyczny. Poza ekranem ustawień przełącznik **PL / EN** stoi też w pasku
+górnym — dotknięcie go ustawia język wprost, bo kto go dotyka, chce konkretnego, nie „jak
+w telefonie". Bez wyboru aplikacja bierze język przeglądarki: telefon ustawiony po angielsku otwiera
+odczyt ratunkowy po angielsku, bez klikania czegokolwiek — o to w tym chodzi, bo ratownik
+z zagranicy nie będzie szukał przełącznika nad nieprzytomnym pacjentem.
+Zmiana języka przerysowuje bieżący ekran w miejscu: otwarta karta zostaje otwarta, a na ekranie
+odczytu nie dokłada drugiego wpisu do historii.
+
+Polski jest źródłem, angielski leży w słowniku `EN` na końcu `web/app.html`. Kluczem jest dokładny
+napis polski — razem ze znacznikami, jeśli literał je niesie — więc napis bez wpisu w słowniku
+zostaje po polsku, zamiast zniknąć. Napisy z wartościami w środku mają miejsca `{0}`, `{1}`, żeby
+tłumaczenie mogło ustawić je w innej kolejności.
+
+Wartości zapisane w karcie zostają po polsku, bo to dane, nie etykiety: `aktywna`, `doustnie`,
+`brelok`, `dostęp lekarza`. Na ekran idą przez `t(wartość)`, a ich spis leży w `T_DANE`.
+
+`test/i18n.test.js` pilnuje trzech rzeczy: każdy napis objęty `t()` ma wpis w słowniku, tłumaczenie
+ma ten sam szkielet znaczników i te same miejsca na wartości co oryginał, a w słowniku nie ma wpisów
+bez użycia. Nowy napis w kodzie bez wpisu w słowniku wywala testy — tak, żeby interfejs nie rozjechał
+się na pół polski, pół angielski.
+
+## Nośniki: opaska, brelok, karta do portfela
+
+Jedna karta, kilka rzeczy, które do niej prowadzą. Opaska trzyma się nadgarstka i nie gubi, więc
+trafia do osób starszych i do dzieci; brelok do kluczy nosi ten, kto opaski nie założy; karta do
+portfela jest zapasem bez elektroniki. Wszystkie niosą ten sam adres tej samej karty i wszystkie
+odczytuje się tak samo — rodzaj zmienia nazwy na ekranie i to, czego pacjent szuka, gdy jeden zginie.
+
+Karta ma jeden adres własny (`tag_id`), ten sam przez całe jej życie, bo z nim wiąże się skrót PIN-u
+(`hero:<tag>:<pin>`). Nośniki wskazują na ten adres: pierwszy powstaje razem z kartą i jest nim sam
+adres własny, kolejne dokłada pacjent w zakładce „Nośniki". `GET /api/tags/:tag` mówi, do której
+karty prowadzi dany identyfikator; treści karty nie oddaje.
+
+Nośnik nosi jeden rekord NDEF typu URL: adres aplikacji z identyfikatorem w kotwicy, na przykład
+`https://hero.example/#/t/HERO-2481-KX`. Trasa siedzi w kotwicy, a nie w ścieżce, bo ten sam plik
+chodzi też poza serwerem HERO. Danych medycznych w nośniku nie ma.
+
+Zapis robi sama przeglądarka, w karcie pacjenta, w zakładce „Nośniki"; zaraz po założeniu karty
+aplikacja otwiera tę zakładkę, bo karta bez nośnika jest samym adresem. Obok zapisu są tam jeszcze
+dwie rzeczy: sprawdzenie, co w nośniku już leży, i zabezpieczenie go przed nadpisaniem
 (`makeReadOnly` — nieodwracalne).
 
 Web NFC działa dziś w Chrome na Androidzie, wyłącznie w bezpiecznym kontekście (HTTPS albo
 localhost) i po kliknięciu. Gdzie indziej — w tym na iOS — przyciski są wyłączone, a zostaje adres
 do skopiowania i zapisania dowolną aplikacją do NFC jako rekord typu URL. Ratownik do odczytu żadnej
-aplikacji nie potrzebuje: Android i iOS otwierają adres z opaski same.
+aplikacji nie potrzebuje: Android i iOS otwierają adres z nośnika same.
 
 Obok adresu jest kod QR z tą samą treścią. Działa tam, gdzie NFC nie: na telefonie bez czytnika,
 na iOS, przy wyłączonym module NFC i po wydrukowaniu. Koder siedzi w `web/app.html` (tryb bajtowy,
@@ -141,47 +206,49 @@ korekcja M, wersje 1–10, czyli do 213 bajtów) i nie ma zależności — kod p
 strony, więc nie wychodzi z niej żadne żądanie. Zostaje czarny na białym także w ciemnym motywie,
 bo skaner czyta kontrast, nie motyw.
 
-Po zbliżeniu opaski otwiera się jeden adres, a zakres zależy od tego, kto go otworzył:
+Po zbliżeniu nośnika otwiera się jeden adres, a zakres zależy od tego, kto go otworzył:
 
 | Kto zbliżył | Co widzi |
 |---|---|
 | pacjent z otwartą sesją tej karty | swoja karta w edytorze, bez pytania o PIN |
 | przeglądarka, która otwierała tę kartę PIN-em pacjenta | pytanie o PIN, potem edytor |
-| zalogowane konto lekarza | pytanie o PIN pacjenta; otwarcie idzie do historii jako dostęp lekarza |
-| ktokolwiek inny | odczyt ratunkowy od razu, bez pytania o cokolwiek; odczyt idzie do historii |
+| zalogowane konto lekarza albo ratownika | cała karta od razu, bez pytania o PIN; otwarcie idzie do historii jako dostęp lekarza albo ratownika |
+| ktokolwiek inny | zestaw ratunkowy od razu, bez pytania o cokolwiek; odczyt idzie do historii |
 
-Rozpoznanie roli to podpowiedź z tej przeglądarki, nie uprawnienie — identyfikatory opasek, które
-otwarto PIN-em pacjenta, leżą w `localStorage` pod kluczem `hero.owners.v1`, a usunięcie karty je
-stamtąd kasuje. Zakres i tak otwiera dopiero PIN, a odczyt ratunkowy jest jawny dla każdego, kto zna
-identyfikator opaski — z podpowiedzi albo bez niej. Rolę można przełączyć ręcznie paskiem nad kartą.
+Rozpoznanie roli to podpowiedź z tej przeglądarki, nie uprawnienie — karty, które otwarto tu PIN-em
+pacjenta, leżą w `localStorage` pod kluczem `hero.owners.v1`, a usunięcie karty je stamtąd kasuje.
+Zakres i tak otwiera dopiero PIN albo konto, a zestaw ratunkowy jest jawny dla każdego, kto zna
+identyfikator — z podpowiedzi albo bez niej. Rolę można przełączyć ręcznie paskiem nad kartą.
 
 ### Karta do portfela
 
 Przycisk „Wydrukuj kartę do portfela" w tej samej zakładce składa zestaw krytyczny na jedną stronę:
 czarno na białym, w kolejności z odczytu ratunkowego (alergie, leki z wyróżnionymi antykoagulantami,
 choroby, wszczepy i uwagi, kontakt alarmowy), z kodem QR prowadzącym pod adres karty. To zapas na
-sytuację, w której telefon pacjenta jest rozładowany, a opaski nie ma czym odczytać. Styl `@media print`
+sytuację, w której telefon pacjenta jest rozładowany, a nośnika nie ma czym odczytać. Styl `@media print`
 zdejmuje z wydruku pasek górny, stopkę i przyciski.
 
-### Zgubiona opaska
+### Zgubiony nośnik
 
-Sam identyfikator z opaski otwiera odczyt ratunkowy, więc opaska zgubiona jest kluczem do zestawu
-krytycznego dopóty, dopóki pacjent jej nie odetnie. W zakładce „Opaska NFC" są na to dwie drogi:
+Sam identyfikator otwiera zestaw ratunkowy, więc zgubiona opaska jest do niego kluczem dopóty, dopóki
+pacjent jej nie odetnie. W zakładce „Nośniki" są na to dwie drogi:
 
-- **unieważnienie** — adres przestaje oddawać kartę: `GET /api/cards/:tag` odpowiada 410, a nie 404,
-  bo ratownik ze starą opaską w ręku ma wiedzieć, że trafił na odciętą, a nie na zepsuty serwis.
-  Treść karty zostaje, pacjent otwiera ją dalej PIN-em. Operacji nie da się cofnąć;
-- **przeniesienie na nową opaskę** — to samo, plus kopia karty pod nowym identyfikatorem. Pod starym
-  zostaje nagrobek: historia odczytów tamtej opaski, bez treści karty. Nowa opaska startuje z pustą
-  historią, bo historia dotyczy opaski, nie pacjenta.
+- **unieważnienie jednego nośnika** (przycisk przy nim) — ten identyfikator przestaje oddawać kartę:
+  `GET /api/cards/:tag` odpowiada 410, a nie 404, bo ratownik ze zgubioną opaską w ręku ma wiedzieć,
+  że trafił na odciętą, a nie na zepsuty serwis. Karta, historia odczytów i pozostałe nośniki działają
+  dalej — pacjent, który nosi opaskę i brelok, po zgubieniu opaski zostaje z czynnym brelokiem;
+- **odcięcie całej karty** — to samo naraz dla wszystkich nośników. Treść karty zostaje, pacjent
+  otwiera ją dalej PIN-em.
 
-Przeniesienie pyta o PIN jeszcze raz, mimo otwartej sesji. Skrót PIN-u wiąże się z identyfikatorem
-opaski (`hero:<tag>:<pin>`), więc nowy adres wymaga skrótu przeliczonego dla niego, a przeglądarka
-trzyma sam skrót, nie PIN. Sam PIN się nie zmienia.
+Obie operacje idą na PIN-ie karty i obu nie da się cofnąć. Nowy nośnik dodaje się w tej samej
+zakładce: dostaje własny identyfikator, prowadzi do tej samej karty i nie wymaga nowego PIN-u, bo
+skrót wiąże się z adresem własnym karty, nie z nośnikiem. Historia odczytów należy do karty, więc
+wymiana zgubionej opaski na nową jej nie kasuje.
 
-Bez serwera HERO karta leży w pamięci jednej przeglądarki. Opaska zaprowadzi pod ten sam adres każdy
-telefon, ale kartę znajdzie pod nim tylko ta jedna przeglądarka; opaska, która ma zadziałać
-u ratownika, wymaga serwera.
+Bez serwera HERO karta leży w pamięci jednej przeglądarki. Nośnik zaprowadzi pod ten sam adres każdy
+telefon, ale kartę znajdzie pod nim tylko ta jedna przeglądarka; nośnik, który ma zadziałać
+u ratownika, wymaga serwera. Podział na zestaw ratunkowy i całą kartę w tym trybie tylko pokazuje
+zakresy: dane leżą w `localStorage` tej przeglądarki, więc nie ma tam czego egzekwować.
 
 ## Struktura
 
@@ -192,17 +259,20 @@ tools/build.mjs   opakowuje web/app.html w public/index.html
 tools/cert.mjs    certyfikat samopodpisany do testów po HTTPS (npm run cert)
 public/           artefakt builda, serwowany przez serwer
 server/index.js   serwer HTTP i routing
-server/db.js      schemat SQLite i operacje na kartach
-server/doctors.js konta lekarzy, logowanie, sesje
-server/secrets.js scrypt na PIN-ach kart i hasłach lekarzy
+server/db.js      schemat SQLite, operacje na kartach i rejestr nośników
+server/doctors.js konta zawodowe (lekarz, ratownik medyczny), logowanie, sesje
+server/secrets.js scrypt na PIN-ach kart i hasłach kont
 server/limit.js   licznik żądań w oknie czasu
 server/seed.js    przykładowa karta i konto lekarza
 test/api.test.js  testy API
-test/nfc.test.js  identyfikator i adres opaski (blok NFC wycięty z web/app.html)
+test/nfc.test.js  identyfikator i adres nośnika (blok NFC wycięty z web/app.html)
 test/qr.test.js   koder kodu QR (blok QR wycięty z web/app.html)
 test/karta.test.js zawartość i kolejność odczytu ratunkowego (blok KARTA)
+test/i18n.test.js pokrycie słownika angielskiego
+test/ustawienia.test.js wybór języka i motywu, komplet zmiennych obu motywów
 .github/workflows testy na każdy push i pull request (Node 22.13, 22 i 24);
                   strona.yml wystawia aplikację na GitHub Pages
+deploy/           gotowe pliki wdrożenia: Render, Fly.io, docker compose z Caddym
 docs/             model danych i plan rozwoju
 ```
 
@@ -214,36 +284,40 @@ docs/             model danych i plan rozwoju
 |---|---|---|---|
 | GET | `/api/health` | — | stan usługi i liczba kart w bazie |
 | GET | `/api/cards` | — | lista kart przykładowych (identyfikator, nazwisko, znacznik demo, data zmiany) |
-| GET | `/api/cards/:tag` | — | treść karty bez historii odczytów i bez skrótu PIN-u; unieważniona opaska oddaje 410 |
+| GET | `/api/tags/:tag` | — | do której karty prowadzi ten nośnik: `{tagId, kind, revoked, revokedAt}`, bez treści karty |
+| GET | `/api/cards/:tag` | — albo nagłówek `x-hero-doctor` | `:tag` to identyfikator dowolnego nośnika tej karty. Bez konta: zestaw ratunkowy (`rescue: true`) i rodzaj użytego nośnika; z kontem zawodowym: cała karta z historią odczytów i listą nośników, a otwarcie idzie do historii. Skrótu PIN-u nie oddaje nigdy; unieważniony nośnik oddaje 410 |
 | POST | `/api/cards/:tag/session` | `{digest}` | pełna karta z historią odczytów |
-| PUT | `/api/cards/:tag` | nagłówek `x-hero-pin` | zapis karty; gdy karty nie ma w bazie, tworzy ją na podstawie `pinHash` (bez znacznika demo) |
+| PUT | `/api/cards/:tag` | nagłówek `x-hero-pin` | zapis karty; gdy karty nie ma w bazie, tworzy ją na podstawie `pinHash` (bez znacznika demo), razem z pierwszym nośnikiem z pola `carrier` |
 | DELETE | `/api/cards/:tag` | nagłówek `x-hero-pin` | usuwa kartę i jej historię |
 | POST | `/api/cards/:tag/pin` | nagłówek `x-hero-pin` + `{pinHash}` | zmienia PIN; karta, historia i opaska zostają |
-| POST | `/api/cards/:tag/reads` | — dla odczytu ratunkowego, `x-hero-doctor` dla dostępu lekarza | zapisuje odczyt; czas, identyfikator i kontekst nadaje serwer, przy koncie lekarza także opis czytnika |
-| POST | `/api/cards/:tag/revoke` | nagłówek `x-hero-pin` | unieważnia opaskę; adres przestaje oddawać kartę, treść karty zostaje |
-| POST | `/api/cards/:tag/move` | nagłówek `x-hero-pin` + `{tagId, pinHash}` | przenosi kartę na nową opaskę i unieważnia starą |
-| POST | `/api/doctors` | — | zakłada konto lekarza (`pwz`, `name`, `password`) |
+| POST | `/api/cards/:tag/reads` | — dla odczytu ratunkowego, `x-hero-doctor` dla dostępu lekarza i ratownika | zapisuje odczyt; czas, identyfikator i kontekst nadaje serwer, przy koncie zawodowym także opis czytnika |
+| POST | `/api/cards/:tag/revoke` | nagłówek `x-hero-pin` | odcina całą kartę: żaden nośnik nie oddaje jej już do odczytu, treść karty zostaje |
+| POST | `/api/cards/:tag/carriers` | nagłówek `x-hero-pin` + `{tagId, kind, label}` | dodaje nośnik prowadzący do tej karty; oddaje listę nośników |
+| DELETE | `/api/cards/:tag/carriers/:nosnik` | nagłówek `x-hero-pin` | unieważnia jeden nośnik; karta i pozostałe zostają |
+| POST | `/api/doctors` | — | zakłada konto zawodowe (`pwz`, `name`, `password`, `role`: `lekarz` albo `ratownik`) |
 | POST | `/api/doctors/session` | `{pwz, password}` | loguje; zwraca token sesji |
 | GET | `/api/doctors/me` | nagłówek `x-hero-doctor` | konto z tokenu wraz z liczbą zalogowanych urządzeń |
 | DELETE | `/api/doctors/session` | nagłówek `x-hero-doctor` | wylogowuje to urządzenie |
 | DELETE | `/api/doctors/sessions` | nagłówek `x-hero-doctor` | wylogowuje konto ze wszystkich urządzeń |
 
-Endpointy oznaczone „—" nie sprawdzają niczego poza poprawnością identyfikatora opaski: treść karty
-pobiera każdy, kto zna identyfikator, i każdy może dopisać wpis do historii odczytów. Karty zwykłej
+Endpointy oznaczone „—" nie sprawdzają niczego poza poprawnością identyfikatora nośnika: zestaw
+ratunkowy pobiera każdy, kto zna identyfikator, i każdy może dopisać wpis do historii odczytów. Karty zwykłej
 nie da się jednak wyszukać — `GET /api/cards` oddaje wyłącznie karty z `demo = 1`, a ten znacznik
 nadaje tylko `npm run seed`, bo żądanie HTTP go nie ustawia. `GET /api/health` podaje samą liczbę
 kart w bazie, bez identyfikatorów.
 
 Dwa liczniki w `server/limit.js` (oba w pamięci procesu, oba odpowiadają 429 po przekroczeniu): zapis
 odczytu — 30 żądań na minutę z jednego adresu; próby PIN-u — 10 nieudanych na 15 minut, liczone
-osobno dla pary adres–opaska, a poprawny PIN kasuje licznik. Nieudane logowania lekarza liczy ten sam
+osobno dla pary adres–opaska, a poprawny PIN kasuje licznik. Nieudane logowania do konta zawodowego liczy ten sam
 licznik, na osobnym kluczu. Blokada obejmuje wszystkie ścieżki z PIN-em: sesję, zapis, zmianę PIN-u,
-unieważnienie opaski, przeniesienie karty i jej usunięcie. Za reverse proxy serwer widzi adres proxy,
+odcięcie karty, operacje na nośnikach i usunięcie karty. Za reverse proxy serwer widzi adres proxy,
 więc limit trzeba postawić także tam.
 
-`GET /api/cards/:tag` oddaje kartę w całości, także rozpoznania ze statusem `przebyta`. Zawężenie do
-zestawu krytycznego robi przeglądarka, nie serwer: `critical()` i kolejność wpisów leżą w bloku
-`KARTA` w `web/app.html`, a `test/karta.test.js` sprawdza je bez przeglądarki.
+`GET /api/cards/:tag` bez konta oddaje sam zestaw ratunkowy: zawęża go serwer, w `rescueCard`
+w `server/db.js`. Z kontem zawodowym oddaje kartę w całości, także rozpoznania ze statusem `przebyta`;
+wtedy jeszcze jedno zawężenie robi przeglądarka — `critical()` zdejmuje przebyte z ekranu odczytu.
+Kolejność wpisów i zawartość odczytu leżą w bloku `KARTA` w `web/app.html`, a `test/karta.test.js`
+sprawdza je bez przeglądarki.
 
 Przeglądarka nie wysyła PIN-u. Liczy `SHA-256("hero:<tag>:<pin>")`, a serwer przepuszcza ten skrót
 jeszcze raz przez scrypt z losową solą. Gdy `crypto.subtle` jest niedostępne — a jest tylko
@@ -254,20 +328,24 @@ skrótu djb2, który nie jest funkcją kryptograficzną. Do produkcji potrzebny 
 
 Stan na dziś to działający prototyp, nie system produkcyjny. Przed wdrożeniem trzeba domknąć:
 
-- **Odczyt ratunkowy jest jawny dla każdego, kto zna identyfikator opaski.** To świadoma decyzja
-  produktowa: ratownik nie ma czasu na logowanie. Dwie rzeczy, które z niej wynikały, są już zrobione —
-  identyfikator nowej karty niesie 128 bitów losowości, a zgubioną opaskę da się unieważnić i przenieść
-  kartę na nową. Zostaje to, że formatu identyfikatora serwer nie wymusza: bierze każdy pasujący do
-  `TAG`, bo karty założone wcześniej i karta przykładowa z seeda mają identyfikatory krótkie.
-- **Numer PWZ nie jest weryfikowany.** Sprawdzamy tylko format — siedem cyfr. Nie liczymy cyfry
-  kontrolnej i nie odpytujemy rejestru Naczelnej Izby Lekarskiej, więc konto nie dowodzi uprawnień.
-- **Dostęp lekarza to nadal PIN pacjenta.** Konto dokłada tożsamość i podpis, nie zmienia sposobu
-  wchodzenia do karty. Docelowo pacjent nadaje dostęp osobnym kodem, z terminem ważności.
-- **Zapis opaski działa tylko w Chrome na Androidzie.** Web NFC nie istnieje w Safari ani w żadnej
+- **Zestaw ratunkowy jest jawny dla każdego, kto zna identyfikator z nośnika.** To świadoma decyzja
+  produktowa: ratownik nie ma czasu na logowanie. Dlatego bez konta nie wychodzą dane, które wskazują
+  osobę — nazwisko, data urodzenia, kontakty alarmowe — a identyfikator nowej karty niesie 128 bitów
+  losowości, a zgubiony nośnik da się unieważnić osobno, bez ruszania pozostałych. Zostaje to, że formatu
+  identyfikatora serwer nie wymusza: bierze każdy pasujący do `TAG`, bo karty założone wcześniej
+  i karta przykładowa z seeda mają identyfikatory krótkie.
+- **Numer zawodowy nie jest weryfikowany — to dziś najsłabsze miejsce dostępu do całej karty.**
+  Sprawdzamy sam format: siedem cyfr u lekarza, od czterech do dwudziestu znaków u ratownika. Nie
+  liczymy cyfry kontrolnej PWZ i nie odpytujemy rejestru Naczelnej Izby Lekarskiej ani rejestru
+  ratowników medycznych, więc konto zakłada każdy, kto wpisze numer w dobrym formacie. Konto otwiera
+  kartę w całości, więc przed wdrożeniem trzeba tu postawić weryfikację w rejestrze — przez podmiot
+  zatrudniający albo przez węzeł krajowy. Do tego czasu jedynym śladem nadużycia jest historia
+  odczytów, którą pacjent widzi w swojej karcie.
+- **Zapis nośnika działa tylko w Chrome na Androidzie.** Web NFC nie istnieje w Safari ani w żadnej
   przeglądarce na iOS, więc pacjent z iPhone'em musi zapisać adres osobną aplikacją do NFC. Odczytu
-  to nie dotyczy — adres z opaski otwierają oba systemy.
+  to nie dotyczy — adres z nośnika otwierają oba systemy.
 - **Opis czytnika przy odczycie ratunkowym jest deklaracją.** Kontekst wpisu nadaje serwer, a przy
-  dostępie lekarza opis bierze się z konta. Przy odczycie ratunkowym pole „kto odczytał" nadal
+  dostępie kontem zawodowym opis bierze się z konta. Przy odczycie ratunkowym pole „kto odczytał" nadal
   wypełnia klient: historia dowodzi, że ktoś sięgnął po kartę, nie tego, kto to był.
 - **Licznik prób żyje w pamięci procesu.** Restart serwera go zeruje, a przy kilku instancjach każda
   liczy osobno. Za reverse proxy dochodzi to, że serwer widzi adres proxy zamiast klienta, więc limit
@@ -282,6 +360,11 @@ Stan na dziś to działający prototyp, nie system produkcyjny. Przed wdrożenie
 Serwer to jeden proces Node i plik SQLite obok niego; zależności z npm nie ma żadnych. TLS kończy
 się na reverse proxy — serwer umie HTTPS sam (patrz [HTTPS](#https)), ale certyfikat z urzędu,
 przekierowanie z portu 80 i limit żądań wygodniej trzymać w proxy.
+
+Gotowe pliki dla trzech dróg leżą w [`deploy/`](deploy/README.md): Render (jedyna droga, którą da się
+przejść z samego telefonu), Fly.io (wymaga `flyctl`, więc komputera) i własny serwer na docker compose
+z Caddym. `deploy/README.md` mówi, co kiedy wybrać i co skopiować. Sekcje niżej opisują to samo od
+strony pojedynczych narzędzi.
 
 ### Kontener
 

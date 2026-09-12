@@ -1,0 +1,36 @@
+# HERO na własnym serwerze: dwa kontenery — aplikacja i Caddy, który bierze na siebie HTTPS.
+# Zmień `hero.example` na swoją domenę w deploy/Caddyfile, potem: docker compose up -d
+#
+# Bez domeny HTTPS-a nie będzie, a bez HTTPS-a przeglądarka nie da ani zapisu NFC,
+# ani crypto.subtle. Domena jest tu warunkiem, nie ozdobą.
+
+services:
+  hero:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file: hero.env
+    volumes:
+      - hero-data:/data
+    # Portu nie wystawiamy na świat: ruch wchodzi przez Caddy.
+    expose:
+      - "8080"
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - hero
+
+volumes:
+  hero-data:
+  caddy-data:
+  caddy-config:

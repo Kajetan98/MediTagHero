@@ -25,19 +25,23 @@ reads (
   tag_id TEXT REFERENCES cards(tag_id) ON DELETE CASCADE,
   at     TEXT,   -- czas nadany przez serwer, nie przez klienta
   "by"   TEXT,   -- opis czytnika, np. "ZRM P-12"
-  ctx    TEXT    -- 'odczyt ratunkowy' | 'dostęp lekarza'; nadaje serwer, wartość spoza tych dwóch
-                 -- schodzi do odczytu ratunkowego
+  ctx    TEXT    -- 'odczyt ratunkowy' | 'dostęp lekarza' | 'dostęp ratownika'; nadaje serwer
+                 -- z roli konta, wartość spoza tych trzech schodzi do odczytu ratunkowego
 )
 ```
 
-### Konta lekarzy
+### Konta zawodowe
 
 ```sql
 doctors (
   id         TEXT PRIMARY KEY,
-  pwz        TEXT UNIQUE,   -- numer prawa wykonywania zawodu, siedem cyfr
+  pwz        TEXT UNIQUE,   -- lekarz: numer PWZ, siedem cyfr
+                            -- ratownik: numer w rejestrze ratowników medycznych, 4-20 znaków
   name       TEXT,
   pass       TEXT,          -- scrypt$<sól>$<klucz>
+  role       TEXT,          -- 'lekarz' | 'ratownik'; decyduje o formacie numeru, o kontekście
+                            -- wpisu w historii i o tym, czy konto podpisuje wpisy w karcie
+                            -- (kolumna dochodzi migracją do baz założonych wcześniej)
   created_at TEXT
 )
 
@@ -107,34 +111,43 @@ którym idzie zapis, a bez konta schodzi do `source: "pacjent"` i traci `signedB
 zapisuje się jako „lekarz" przy koncie i „pacjent" bez konta. Zapis z pominięciem tej reguły ma tylko
 `seed.js` (`upsert` z `{ trusted: true }`), bo nie idzie przez HTTP.
 
-Bez serwera reguły nie ma czym egzekwować. W trybie przeglądarkowym konto lekarza leży w `localStorage`
+Bez serwera reguły nie ma czym egzekwować. W trybie przeglądarkowym konto leży w `localStorage`
 pod kluczem `hero.doctors.v1`, a podpis jest etykietą, nie dowodem.
 
-Konto lekarza nie zmienia sposobu wchodzenia do karty — do tego nadal służy PIN pacjenta. Zmienia
-to, co zostaje po zapisie: zamiast anonimowego „zweryfikowane przez lekarza" wpis niesie nazwisko
-i numer PWZ konta, którym szedł zapis. Dostęp nadawany osobnym kodem pacjenta zostaje w planie
-rozwoju (punkt 4).
+Podpisuje wyłącznie konto lekarza. Ratownik medyczny karty nie redaguje — jego konto otwiera ją do
+odczytu, a `role` decyduje o tym po stronie serwera, nie po stronie ekranu.
+
+**Dwa zakresy odpowiedzi.** `GET /api/cards/:tag` bez konta oddaje `rescueCard`: grupa krwi, wiek
+policzony na serwerze, waga, wzrost, języki, wszczepy, uwagi, DNR, dawca, wszystkie alergie, leki
+z `anticoag`, rozpoznania nieprzebyte. Nie ma tam `person.name`, `person.birthDate`, `contacts`,
+`reads` ani `pinHash` — te pola nie opuszczają bazy, więc nie da się ich odczytać z ruchu. Z kontem
+zawodowym (nagłówek `x-hero-doctor`) serwer oddaje `fullCard` i zapisuje odczyt w historii.
+Aplikacja liczy ten sam zakres jeszcze raz w `rescueOf` (blok `KARTA` w `web/app.html`) na potrzeby
+trybu bez serwera; `test/api.test.js` porównuje oba opisy, żeby się nie rozeszły.
 
 **Część pól steruje układem odczytu ratunkowego.** Do paska flag na górze trafiają: alergia
 o `severity` 3 lub 4, każdy lek z `anticoag`, niepuste `person.devices`, `person.dnr`
 i `person.donor`. Kolejność wpisów też wynika z danych — alergie idą malejąco po `severity`,
 leki z antykoagulantami na początku. `contacts[].primary` dostaje znacznik „pierwszy".
 
-**`status: "przebyta"`** wypada z odczytu ratunkowego, ale zostaje w karcie pacjenta. Filtruje
-wyłącznie przeglądarka (`critical()`); `GET /api/cards/:tag` oddaje wszystkie rozpoznania, także
-przebyte. Ekran odczytu ich nie pokaże, samo API — tak.
+**`status: "przebyta"`** wypada z odczytu ratunkowego, ale zostaje w karcie pacjenta. Filtrują to
+dwa miejsca: `rescueCard` na serwerze (bez konta rozpoznanie przebyte nie wychodzi z bazy)
+i `critical()` w przeglądarce (z kontem karta przychodzi w całości, a przebyte zdejmuje dopiero
+ekran odczytu). Rozpoznanie bez statusu i rozpoznanie kontrolowane zostają w obu miejscach: brak
+pola nie jest powodem, żeby coś przed ratownikiem ukryć.
 
-**Historia odczytów nie wychodzi z zestawu jawnego.** `GET /api/cards/:tag` zwraca kartę bez `reads`
-i bez `pinHash`; historia wymaga PIN-u (`POST /api/cards/:tag/session`). Dotyczy to trybu z serwerem:
+**Historia odczytów nie wychodzi z zestawu ratunkowego.** `GET /api/cards/:tag` bez konta zwraca
+kartę bez `reads` i bez `pinHash`; historia wymaga PIN-u pacjenta (`POST /api/cards/:tag/session`)
+albo konta zawodowego. Dotyczy to trybu z serwerem:
 bez niego aplikacja czyta `localStorage`, gdzie karta leży w całości — razem ze skrótem PIN-u
 i historią — bo dane nie opuszczają jednej przeglądarki.
 
 **Ślad odczytu ratunkowego zapisze każdy, kto zna identyfikator opaski** — inaczej nie da się go
 pogodzić z odczytem bez logowania. Serwer ogranicza to z trzech stron: `ctx` bierze z zamkniętej
-listy (`READ_CTX`), wpis o dostępie lekarza przyjmuje wyłącznie z konta lekarza, a liczbę żądań
-z jednego adresu tnie limit z `server/limit.js`. Historia karty trzyma ostatnie 200 wpisów, starsze
-kasuje się przy zapisie. Przy dostępie lekarza opis czytnika bierze się z konta; przy odczycie
-ratunkowym zostaje deklaracją klienta — potwierdzi go dopiero uwierzytelnienie czytnika.
+listy (`READ_CTX`), wpis o dostępie lekarza albo ratownika przyjmuje wyłącznie z konta o tej roli,
+a liczbę żądań z jednego adresu tnie limit z `server/limit.js`. Historia karty trzyma ostatnie 200
+wpisów, starsze kasuje się przy zapisie. Przy dostępie kontem opis czytnika bierze się z konta; przy
+odczycie ratunkowym zostaje deklaracją klienta — potwierdzi go dopiero uwierzytelnienie czytnika.
 
 **Opaska nosi adres, nie dane.** W tagu leży jeden rekord NDEF typu URL: adres aplikacji
 z identyfikatorem karty w kotwicy (`…/#/t/HERO-2481-KX`). Nic poza tym w opasce nie ma, więc
@@ -152,19 +165,30 @@ base32 Crockforda bez I, L, O i U, `HERO-` plus 26 znaków). Skoro sam identyfik
 ratunkowy, jego długość jest tu jedyną ochroną przed zgadywaniem. Serwer formatu nie wymusza — bierze
 każdy identyfikator pasujący do `TAG` (do 32 znaków), bo karty założone wcześniej i karta przykładowa
 z `npm run seed` mają identyfikatory krótkie. Nikt takiego identyfikatora nie wpisze z pamięci, więc
-ekran pacjenta podaje listę opasek znanych tej przeglądarce, a pełny identyfikator zostaje w opasce
+ekran pacjenta podaje listę kart znanych tej przeglądarce, a pełny identyfikator zostaje w nośniku
 i w kodzie QR.
 
-**Unieważniona opaska zostaje w bazie jako nagrobek.** `revoked_at` nie usuwa wiersza: stary adres ma
-odpowiadać „opaska unieważniona" (410), a nie „nie ma takiej karty" (404), bo to dwie różne informacje
-dla ratownika, który właśnie zbliżył telefon. Unieważnienie zostawia treść karty — pacjent otwiera ją
-dalej PIN-em i może przenieść na nową opaskę. Przeniesienie (`move`) zakłada wiersz pod nowym
-identyfikatorem z tą samą treścią i tym samym PIN-em, a stary czyści z treści i nazwiska, zostawiając
-mu historię odczytów: historia dotyczy opaski, nie pacjenta, więc nowa startuje pusta.
+**Unieważniony nośnik zostaje w bazie jako nagrobek.** `revoked_at` nie usuwa wiersza: stary
+identyfikator ma odpowiadać „nośnik unieważniony" (410), a nie „nie ma takiej karty" (404), bo to dwie
+różne informacje dla ratownika, który właśnie zbliżył telefon. To samo pole jest w `cards`
+(odcięcie całej karty) i w `carriers` (jeden zgubiony nośnik); oba zostawiają treść karty, którą
+pacjent otwiera dalej PIN-em.
 
-Nowy adres wymaga skrótu PIN-u przeliczonego dla niego, bo skrót wiąże się z identyfikatorem opaski
-(`hero:<tag>:<pin>`). Dlatego przeniesienie pyta pacjenta o PIN jeszcze raz, choć sesja jest otwarta:
-przeglądarka trzyma sam skrót, nie PIN.
+**Karta ma jeden adres własny, nośników dowolnie wiele.** `cards.tag_id` nie zmienia się przez całe
+życie karty, bo wiąże się z nim skrót PIN-u (`hero:<tag>:<pin>`); `carriers.tag_id` to identyfikator
+zapisany w opasce, breloku albo na karcie do portfela, a `carriers.card_id` mówi, do której karty
+prowadzi. Pierwszy nośnik powstaje razem z kartą i jest nim sam adres własny. Dzięki temu wymiana
+zgubionej opaski nie rusza ani PIN-u, ani historii odczytów: historia należy do karty, nie do rzeczy,
+którą pacjent nosi. Rozwiązanie identyfikatora bez treści karty daje `GET /api/tags/:tag`.
+
+Identyfikator zajęty przez nośnik nie założy pod sobą własnej karty (`upsert` odpowiada 409):
+prowadziłby wtedy w dwa miejsca naraz.
+
+**Słownictwo danych zostaje po polsku.** `status`, `kind`, `route`, `source`, `ctx` i rodzaj nośnika
+zapisują się w bazie po polsku niezależnie od języka interfejsu: to wartości, po których kod
+rozpoznaje stan, a nie napisy dla oka. Tłumaczy się je dopiero przy wyświetlaniu (`t(wartość)`
+w `web/app.html`, spis w `T_DANE`). Dzięki temu karta założona po angielsku czyta się tak samo po
+polsku i na odwrót, a zmiana języka nie zmienia treści karty.
 
 **Identyfikatory wpisów nadaje przeglądarka** (`Math.random`), bo wpisy nie wychodzą poza jedną kartę.
 Identyfikatory odczytów nadaje serwer (`randomUUID`), bo są dowodem dostępu — poza trybem bez

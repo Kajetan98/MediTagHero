@@ -1,11 +1,12 @@
 # Plan rozwoju
 
 Kolejność wynika z zależności: bez trwałych identyfikatorów nie ma sensu wypuszczać opasek,
-bez kont lekarzy nie ma sensu obiecywać weryfikacji wpisów.
+bez kont zawodowych nie ma sensu obiecywać weryfikacji wpisów.
 
 ## 1. Zamknięcie prototypu (stan obecny)
 
-Zrobione: model karty, trzy role, odczyt ratunkowy z audytem, API na SQLite, testy.
+Zrobione: model karty, role, dwa zakresy odczytu (zestaw ratunkowy bez konta, cała karta z kontem
+zawodowym), audyt odczytów, API na SQLite, testy.
 
 ## 2. Poprawki do zamknięcia od razu
 
@@ -20,46 +21,54 @@ przy kontach lekarzy lista kart będzie w ogóle potrzebna.
 
 **Podpis źródła — zrobione.** Serwer nie przyjmuje `source: "lekarz"` z żądania: wpis zachowuje
 podpis tylko wtedy, gdy leżał z nim w bazie i nie zmienił treści (`server/db.js`). Podpis powstaje
-wyłącznie z konta lekarza (punkt 4) i niesie jego numer PWZ.
+wyłącznie z konta lekarza (punkt 4) i niesie jego numer PWZ; konto ratownika medycznego wpisów nie
+podpisuje, bo ich nie dodaje.
 
-**Ślad odczytu — częściowo zrobione.** Kontekst wpisu nadaje serwer z zamkniętej listy, dostęp
-lekarza wymaga konta lekarza, żądania z jednego adresu tnie limit (30 na minutę, licznik w pamięci
+**Ślad odczytu — częściowo zrobione.** Kontekst wpisu nadaje serwer z zamkniętej listy i z roli
+konta, dostęp lekarza albo ratownika wymaga konta o tej roli, żądania z jednego adresu tnie limit (30 na minutę, licznik w pamięci
 procesu), a historia karty trzyma ostatnie 200 wpisów. Zostaje opis czytnika, który przy odczycie
 ratunkowym nadal jest deklaracją klienta: potwierdzi go dopiero uwierzytelnienie czytnika (punkt 4).
 Sam limit trzeba przenieść na wspólny magazyn, gdy serwer przestanie być jedną instancją.
 
-## 3. Identyfikator opaski
+## 3. Identyfikator i nośniki
 
 Zrobione: identyfikator nowej karty to 128 bitów losowości w base32 Crockforda (`genTag`), adres
-zapisywany w opasce ma ustalony kształt (rekord NDEF typu URL, trasa `#/t/<identyfikator>`),
-a zgubioną opaskę da się unieważnić — stary adres oddaje wtedy 410 z datą unieważnienia — albo
-przenieść kartę na nową opaskę jednym ruchem. Karty ze starymi, krótkimi identyfikatorami działają
-dalej.
+zapisywany w nośniku ma ustalony kształt (rekord NDEF typu URL, trasa `#/t/<identyfikator>`),
+a zgubiony nośnik da się unieważnić — jego identyfikator oddaje wtedy 410 z datą unieważnienia.
+Jedna karta nosi kilka nośników naraz (opaska, brelok do kluczy, karta do portfela), każdy ze swoim
+identyfikatorem, rodzajem i opisem; historia odczytów należy do karty, nie do nośnika. Karty ze
+starymi, krótkimi identyfikatorami działają dalej.
 
 Zostaje:
 
 - **osobny, krótki numer serwisowy** nadrukowany na opasce, do zgłoszenia zgubienia, nie do odczytu.
-  Dziś unieważnia się opaskę z karty, więc pacjent musi mieć dostęp do karty; numer serwisowy
+  Dziś unieważnia się nośnik z karty, więc pacjent musi mieć dostęp do karty; numer serwisowy
   przydaje się, gdy zgłasza utratę ktoś inny albo gdy zgłoszenie idzie poza aplikację.
 - **wymuszenie długości po stronie serwera** — dziś serwer bierze każdy identyfikator pasujący do
   `TAG` (do 32 znaków), bo inaczej odciąłby karty założone wcześniej i kartę przykładową z seeda.
-- **przypisanie opaski do karty jako osobna encja** (`tags`), bo jeden pacjent może mieć opaskę i kartę
-  na telefonie, a opaskę wymienia się częściej niż kartę. Dziś przeniesienie robi kopię karty pod nowym
-  identyfikatorem i zostawia nagrobek — działa, ale historia odczytów zostaje przy starej opasce,
-  a nie przy pacjencie.
+- ~~przypisanie nośnika do karty jako osobna encja~~ — zrobione: tabela `carriers`, adres własny karty
+  zostaje na miejscu, a opaskę wymienia się bez ruszania PIN-u i historii.
+- **rodzaj nośnika w wydruku i w odczycie ratunkowym** — dziś ratownik widzi identyfikator, ale nie to,
+  czy trzyma opaskę, czy brelok; przy kilku nośnikach jednej karty to ułatwiłoby zgłoszenie zgubienia.
 
-## 4. Konta lekarzy
+## 4. Konta zawodowe: lekarz i ratownik medyczny
 
-Zrobione: konto z numerem PWZ i hasłem, logowanie tokenem sesji, podpis wpisu nadawany przez serwer
-(kto, jaki numer PWZ, kiedy), dostęp lekarza w historii opisany kontem zamiast polem z formularza.
+Zrobione: konto z numerem zawodowym i hasłem, dwie role (lekarz z numerem PWZ, ratownik medyczny
+z numerem w rejestrze), logowanie tokenem sesji, podpis wpisu nadawany przez serwer (kto, jaki numer,
+kiedy), dostęp opisany kontem zamiast polem z formularza. Konto otwiera całą kartę bez PIN-u —
+nieprzytomny pacjent PIN-u nie poda — a bez konta zostaje zestaw ratunkowy, który zawęża serwer
+(`rescueCard`). Podpisuje tylko lekarz: ratownik kartę czyta, ale jej nie redaguje.
 
 Zostaje:
 
-- **weryfikacja numeru PWZ** — dziś sprawdzamy wyłącznie format, siedem cyfr. Do domknięcia: cyfra
-  kontrolna oraz sprawdzenie w rejestrze Naczelnej Izby Lekarskiej. Obie rzeczy trzeba potwierdzić przy
-  źródle, zanim zaczną odrzucać numery: błędny algorytm zablokuje prawdziwych lekarzy.
+- **weryfikacja numeru zawodowego** — dziś sprawdzamy wyłącznie format: siedem cyfr u lekarza, od
+  czterech do dwudziestu znaków u ratownika. To najsłabsze miejsce całego dostępu, bo konto otwiera
+  kartę w całości. Do domknięcia: cyfra kontrolna PWZ oraz sprawdzenie w rejestrze Naczelnej Izby
+  Lekarskiej i w rejestrze ratowników medycznych — albo potwierdzenie przez podmiot zatrudniający.
+  Obie rzeczy trzeba potwierdzić przy źródle, zanim zaczną odrzucać numery: błędny algorytm zablokuje
+  prawdziwych lekarzy i ratowników.
 - **dostęp nadawany przez pacjenta** — kod jednorazowy z terminem ważności i możliwością odebrania,
-  zamiast współdzielenia PIN-u karty.
+  dla osób, które nie mają konta zawodowego: opiekuna, rodziny, przychodni.
 - ~~cykl życia sesji~~ — zrobione: token żyje dobę od wydania, wygasły kasuje się przy pierwszym
   użyciu, a „Wyloguj wszędzie" unieważnia wszystkie tokeny konta. Do rozważenia zostaje przedłużanie
   ważności przy pracy i lista urządzeń z osobnym wylogowaniem każdego. Limit nieudanych prób
@@ -99,6 +108,10 @@ potrzebowała, żeby obsłużyć drugie urządzenie obok MediTag, niezależnie o
 Zanim to trafi do kodu, potrzebny jest opis: co EPI mierzy lub przechowuje, kto jest odbiorcą
 odczytu i czy dane trafiają do tej samej karty pacjenta.
 
+Dwujęzyczność, którą ma już HERO, obejmie EPI z automatu, o ile jego ekrany powstaną w tej samej
+aplikacji: słownik i przełącznik są wspólne dla całego `web/app.html`. Osobnej aplikacji EPI trzeba
+będzie przenieść ten sam mechanizm.
+
 ## 8. Odczyt poza aplikacją i poza siecią
 
 Wcześniejsze punkty zakładają, że ratownik ma działający telefon z NFC i zasięg. Każde z tych
@@ -106,12 +119,14 @@ założeń bywa fałszywe, a karta ma sens tylko wtedy, gdy da się ją odczyta�
 
 - ~~kod QR z tym samym adresem obok tagu NFC~~ — zrobione: kod QR z adresem karty jest w zakładce
   „Opaska NFC", koder w `web/app.html`, bez zależności,
-- ~~widok do druku (`@media print`)~~ — zrobione: „Wydrukuj kartę do portfela" w zakładce „Opaska NFC"
+- ~~widok do druku (`@media print`)~~ — zrobione: „Wydrukuj kartę do portfela" w zakładce „Nośniki"
   składa zestaw krytyczny na jedną stronę, z kodem QR. Eksport do PDF robi okno drukowania przeglądarki,
   osobnego generatora nie ma,
 - odczyt ratunkowy dostępny offline (service worker), bo w karetce brak zasięgu jest normą,
-- wersja angielska odczytu. Model ma pole `person.langs`, ale interfejs jest wyłącznie polski —
-  dotyczy to zarówno pacjenta za granicą, jak i obcokrajowca leczonego w Polsce.
+- ~~wersja angielska odczytu~~ — zrobione: cały interfejs jest dwujęzyczny, przełącznik PL / EN stoi
+  w pasku górnym, a telefon ustawiony po angielsku otwiera odczyt po angielsku bez klikania. Zostaje
+  treść wpisywana przez pacjenta: nazwa leku i rozpoznania zostają w języku, w którym je wpisano,
+  bo to dane, nie napisy interfejsu. Słownik nazw leków (niżej) rozwiązałby i to.
 
 Osobno: alergie, leki i rozpoznania wpisuje się dziś wolnym tekstem, a pola `atc` i `icd10`
 wypełnia człowiek. Słownik podpowiadający nazwy wyłapałby literówkę w nazwie leku, której przy

@@ -1,7 +1,8 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync, readFileSync } from "node:fs";
+import { runInNewContext } from "node:vm";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer, tlsFromEnv, adresyLokalne } from "../server/index.js";
@@ -29,6 +30,13 @@ const post = (path, body, doctor) => json(path, {
   headers: { "content-type": "application/json", ...(doctor ? { "x-hero-doctor": doctor } : {}) },
   body: JSON.stringify(body),
 });
+/* Skróty do serwera z nietkniętymi licznikami: test zalewania historii zużywa limit odczytów
+   na pierwszym serwerze, a część rzeczy trzeba sprawdzić właśnie na ścieżce odczytu. */
+const J = (path, opts) => json(path, opts, baseSwiezy);
+const jsonBody = (metoda, body, naglowki = {}) => ({
+  method: metoda, headers: { "content-type": "application/json", ...naglowki }, body: JSON.stringify(body),
+});
+
 const LEKARZ = { pwz: "1234567", name: "dr Tomasz Lewandowski", password: "meditag123" };
 let TOKEN;
 
@@ -68,7 +76,8 @@ test("nowa karta powstaje, druga próba bez PIN-u jej nie nadpisze", async () =>
   const blocked = await put(`/api/cards/${TAG}`, { person: { name: "Podszywacz" } }, "zly-pin");
   assert.equal(blocked.status, 403);
 
-  const still = await json(`/api/cards/${TAG}`);
+  /* Nazwiska nie ma już w odczycie bez konta, więc zaglądamy PIN-em. */
+  const still = await session(TAG, PIN);
   assert.equal(still.body.person.name, "Jan Kowalski");
 });
 
@@ -88,13 +97,130 @@ test("lista kart oddaje wyłącznie karty przykładowe", async () => {
   assert.equal((await json("/api/health")).body.cards > body.length, true);
 });
 
-test("odczyt ratunkowy nie wymaga PIN-u i nie ujawnia PIN-u ani historii", async () => {
+test("odczyt bez konta oddaje sam zestaw ratunkowy", async () => {
   const { status, body } = await json(`/api/cards/${TAG}`);
   assert.equal(status, 200);
+  assert.equal(body.rescue, true, "odpowiedź mówi wprost, że to zestaw zawężony");
+
+  /* To, co ratuje życie, jest. */
   assert.equal(body.allergies[0].allergen, "Penicylina");
   assert.equal(body.meds[0].anticoag, true);
+  assert.equal(body.person.blood, "0");
+  assert.equal(body.person.rh, "-");
+  assert.equal(body.person.ageYears, 46, "wiek liczy serwer, żeby data urodzenia nie wychodziła");
+
+  /* To, co mówi kim pacjent jest — nie ma. */
+  assert.equal(body.person.name, undefined, "nazwisko wymaga konta");
+  assert.equal(body.person.birthDate, undefined, "data urodzenia identyfikuje, wiek wystarczy");
+  assert.equal(body.contacts, undefined, "kontakty alarmowe to dane osób trzecich");
   assert.equal(body.pinHash, undefined);
   assert.equal(body.reads, undefined);
+});
+
+/* Zakres zestawu ratunkowego jest opisany dwa razy: serwer liczy go w `rescueCard`, a aplikacja
+   w `rescueOf` — na wypadek pracy bez serwera. Ten test pilnuje, żeby te dwa opisy się nie rozeszły. */
+test("zestaw ratunkowy w przeglądarce i na serwerze opisuje ten sam zakres", async () => {
+  const src = readFileSync(new URL("../web/app.html", import.meta.url), "utf8");
+  const blok = src.match(/\/\* KARTA:START[\s\S]*?\/\* KARTA:END \*\//);
+  const ageSrc = src.match(/^const age = .*$/m);
+  assert.ok(blok && ageSrc, "w web/app.html nie ma bloku KARTA ani helpera age");
+  /* Blok liczy napisy przez `t()`; tu interesuje nas sam zakres danych, więc wystarczy przelotka. */
+  const stub = "const t = x => x; const tf = (pl, ...w) => pl;";
+  const { rescueOf } = runInNewContext("(function(){" + stub + "\n" + ageSrc[0] + "\n" + blok[0] + "\nreturn {rescueOf};})()");
+
+  const kli = rescueOf(store.cards.fullCard(TAG));
+  const srv = (await J(`/api/cards/${TAG}`)).body;
+  /* Pola puste pomijamy: serwer oddaje `revokedAt: null`, aplikacja tego pola nie zna. `carrier`
+     opisuje nośnik użyty w żądaniu, nie zakres karty, więc do porównania zakresu nie należy. */
+  const klucze = o => Object.keys(o).filter(k => k !== "carrier" && o[k] !== undefined && o[k] !== null).sort();
+
+  assert.deepEqual(klucze(kli), klucze(srv), "ten sam zestaw pól na wierzchu");
+  assert.deepEqual(klucze(kli.person), klucze(srv.person), "ten sam zestaw pól o pacjencie");
+  assert.equal(kli.person.ageYears, srv.person.ageYears);
+  assert.deepEqual(kli.meds.map(m => m.name), srv.meds.map(m => m.name));
+  assert.deepEqual(kli.conditions.map(c => c.name), srv.conditions.map(c => c.name));
+  assert.deepEqual(kli.allergies.map(a => a.allergen), srv.allergies.map(a => a.allergen));
+});
+
+test("zestaw ratunkowy zawęża leki i rozpoznania, ale nie chowa wątpliwych", async () => {
+  const tag = "HERO-7100-LA";
+  const pin = digest(tag, "4321");
+  assert.equal((await J(`/api/cards/${tag}`, jsonBody("PUT", {
+    pinHash: pin,
+    person: { name: "Ewa Lis", birthDate: "1990-01-01", blood: "A", rh: "+" },
+    meds: [
+      { id: "m1", name: "Rywaroksaban", anticoag: true },
+      { id: "m2", name: "Sertralina", anticoag: false },
+    ],
+    conditions: [
+      { id: "c1", name: "Padaczka", status: "aktywna" },
+      { id: "c2", name: "Cukrzyca typu 2", status: "kontrolowana" },
+      { id: "c3", name: "Zapalenie płuc", status: "przebyta" },
+      { id: "c4", name: "Rozpoznanie bez statusu" },
+    ],
+    contacts: [{ id: "k1", name: "Marek Lis", phone: "+48 600 100 200" }],
+  }))).status, 201);
+
+  const { body } = await J(`/api/cards/${tag}`);
+  assert.deepEqual(body.meds.map(m => m.name), ["Rywaroksaban"],
+    "lek bez znaczenia w nagłym wypadku nie wychodzi bez konta");
+  assert.deepEqual(body.conditions.map(c => c.name),
+    ["Padaczka", "Cukrzyca typu 2", "Rozpoznanie bez statusu"],
+    "odpada tylko przebyte; kontrolowane i bez statusu zostają, bo decydują przy nieprzytomnym");
+});
+
+test("konto zawodowe otwiera pełną kartę i zostawia po sobie ślad", async () => {
+  const tag = "HERO-7200-LB";
+  const pin = digest(tag, "4321");
+  assert.equal((await J(`/api/cards/${tag}`, jsonBody("PUT", { ...newCard(), pinHash: pin }))).status, 201);
+
+  const ratownik = { pwz: "RM/2026/1188", name: "Adam Zieliński", password: "meditag123", role: "ratownik" };
+  assert.equal((await J("/api/doctors", jsonBody("POST", ratownik))).status, 201);
+  const token = (await J("/api/doctors/session", jsonBody("POST", { pwz: ratownik.pwz, password: ratownik.password }))).body.token;
+
+  const pelna = await J(`/api/cards/${tag}`, { headers: { "x-hero-doctor": token } });
+  assert.equal(pelna.status, 200);
+  assert.equal(pelna.body.rescue, undefined, "to już nie jest zestaw zawężony");
+  assert.equal(pelna.body.person.name, "Jan Kowalski", "konto widzi nazwisko");
+  assert.equal(pelna.body.person.birthDate, "1980-05-02");
+  assert.equal(pelna.body.contacts[0].name, "Anna Kowalska", "konto widzi kontakty alarmowe");
+
+  const slad = pelna.body.reads[0];
+  assert.equal(slad.ctx, "dostęp ratownika", "kontekst bierze się z roli konta, nie z żądania");
+  assert.match(slad.by, /Adam Zieliński, ratownik medyczny nr RM\/2026\/1188/);
+  assert.equal((await J(`/api/cards/${tag}`)).body.reads, undefined, "bez konta historii nie widać");
+});
+
+test("konto ratownika nie podpisuje wpisów w karcie", async () => {
+  const tag = "HERO-7300-LC";
+  const pin = digest(tag, "4321");
+  const ratownik = { pwz: "RM/2026/2299", name: "Kinga Mazur", password: "meditag123", role: "ratownik" };
+  assert.equal((await J("/api/doctors", jsonBody("POST", ratownik))).status, 201);
+  const token = (await J("/api/doctors/session", jsonBody("POST", { pwz: ratownik.pwz, password: ratownik.password }))).body.token;
+
+  const zapis = await J(`/api/cards/${tag}`, jsonBody("PUT", {
+    pinHash: pin,
+    person: { name: "Piotr Dąb" },
+    conditions: [{ id: "c1", name: "Astma", status: "aktywna", source: "lekarz" }],
+  }, { "x-hero-doctor": token }));
+  assert.equal(zapis.status, 201);
+  assert.equal(zapis.body.updatedBy, "pacjent", "ratownik pisze jak każdy, kto zna PIN");
+  assert.equal(zapis.body.conditions[0].source, "pacjent");
+  assert.equal(zapis.body.conditions[0].signedBy, undefined, "podpis niesie tylko konto lekarza");
+});
+
+test("konto ratownika zakłada się na numer rejestru, nie na PWZ", async () => {
+  assert.equal((await J("/api/doctors", jsonBody("POST",
+    { pwz: "abc", name: "Za krótki numer", password: "meditag123", role: "ratownik" }))).status, 400);
+  assert.equal((await J("/api/doctors", jsonBody("POST",
+    { pwz: "12345", name: "Marek Ratownik", password: "meditag123", role: "ratownik" }))).status, 201,
+    "ratownikowi nie narzucamy siedmiu cyfr");
+  assert.equal((await J("/api/doctors", jsonBody("POST",
+    { pwz: "12345", name: "Inny Ratownik", password: "meditag123", role: "lekarz" }))).status, 400,
+    "lekarzowi narzucamy");
+  assert.equal((await J("/api/doctors", jsonBody("POST",
+    { pwz: "12345", name: "Duplikat", password: "meditag123", role: "ratownik" }))).status, 409,
+    "numer jest unikalny niezależnie od roli");
 });
 
 test("każdy odczyt trafia do historii dostępnej po PIN-ie", async () => {
@@ -284,13 +410,6 @@ test("TLS bierze się ze ścieżek w środowisku albo nie bierze wcale", () => {
     /certyfikat/i, "brakujący plik zatrzymuje start z czytelnym błędem");
 });
 
-/* Poniższe idzie przez `baseSwiezy`: unieważnienie trzeba sprawdzić także na ścieżce odczytu,
-   a limit odczytów na pierwszym serwerze jest już zużyty. */
-const J = (path, opts) => json(path, opts, baseSwiezy);
-const jsonBody = (metoda, body, naglowki = {}) => ({
-  method: metoda, headers: { "content-type": "application/json", ...naglowki }, body: JSON.stringify(body),
-});
-
 test("unieważniona opaska nie oddaje karty pod starym adresem", async () => {
   const tag = "HERO-6100-KA";
   const pin = digest(tag, "4321");
@@ -321,41 +440,56 @@ test("unieważniona opaska nie oddaje karty pod starym adresem", async () => {
   assert.equal(drugi.body.revokedAt, out.body.revokedAt, "drugie unieważnienie nie przesuwa daty");
 });
 
-test("kartę przenosi się na nową opaskę razem z treścią", async () => {
-  const stary = "HERO-6200-KB", nowy = "HERO-6300-KC";
-  const pinStary = digest(stary, "4321"), pinNowy = digest(nowy, "4321");
-  assert.equal((await J(`/api/cards/${stary}`, jsonBody("PUT", { ...newCard(), pinHash: pinStary }))).status, 201);
-  assert.equal((await J(`/api/cards/${stary}/reads`, jsonBody("POST", { by: "ZRM P-3" }))).status, 201);
+test("karta nosi kilka nośników i każdy gaśnie osobno", async () => {
+  const tag = "HERO-6200-KB", brelok = "HERO-6300-KC";
+  const pin = digest(tag, "4321");
+  assert.equal((await J(`/api/cards/${tag}`, jsonBody("PUT",
+    { ...newCard(), pinHash: pin, carrier: { kind: "opaska", label: "opaska na rękę" } }))).status, 201);
 
-  const ruch = (body, pin) => J(`/api/cards/${stary}/move`, jsonBody("POST", body, pin ? { "x-hero-pin": pin } : {}));
+  const dodaj = (body, klucz) => J(`/api/cards/${tag}/carriers`, jsonBody("POST", body, klucz ? { "x-hero-pin": klucz } : {}));
 
-  assert.equal((await ruch({ tagId: nowy, pinHash: pinNowy }, digest(stary, "0000"))).status, 403, "bez PIN-u nie ma przenoszenia");
-  assert.equal((await ruch({ tagId: nowy }, pinStary)).status, 400, "nowy adres wymaga skrótu PIN-u przeliczonego dla niego");
-  assert.equal((await ruch({ tagId: "nie ma takiego", pinHash: pinNowy }, pinStary)).status, 400);
-  assert.equal((await ruch({ tagId: stary, pinHash: pinNowy }, pinStary)).status, 409, "w to samo miejsce nie ma po co");
+  assert.equal((await dodaj({ tagId: brelok, kind: "brelok" })).status, 403, "nośnik dodaje właściciel PIN-u");
+  assert.equal((await dodaj({ tagId: "nie ma takiego", kind: "brelok" }, pin)).status, 400);
+  assert.equal((await dodaj({ tagId: tag, kind: "brelok" }, pin)).status, 409, "adres własny karty jest już nośnikiem");
 
-  const out = await ruch({ tagId: nowy, pinHash: pinNowy }, pinStary);
-  assert.equal(out.status, 201);
-  assert.equal(out.body.tagId, nowy);
-  assert.equal(out.body.person.name, "Jan Kowalski");
-  assert.equal(out.body.allergies[0].allergen, "Penicylina", "wpisy przechodzą w całości");
-  assert.equal(out.body.reads.length, 0, "nowa opaska startuje z pustą historią");
+  const dodany = await dodaj({ tagId: brelok, kind: "brelok", label: "brelok do kluczy" }, pin);
+  assert.equal(dodany.status, 201);
+  assert.deepEqual(dodany.body.map(n => [n.tagId, n.kind]), [[tag, "opaska"], [brelok, "brelok"]]);
 
-  assert.equal((await J(`/api/cards/${stary}`)).status, 410, "stara opaska odcięta");
-  assert.equal((await J(`/api/cards/${nowy}`)).status, 200, "nowa działa dla ratownika");
+  const zBreloka = await J(`/api/cards/${brelok}`);
+  assert.equal(zBreloka.status, 200, "brelok prowadzi do tej samej karty");
+  assert.equal(zBreloka.body.tagId, tag, "odpowiedź niesie adres własny karty, nie identyfikator nośnika");
+  assert.equal(zBreloka.body.carrier.kind, "brelok", "wiadomo, czym otwarto kartę");
+  assert.equal(zBreloka.body.carrier.label, undefined, "opisu od pacjenta nie oddajemy bez konta — potrafi nieść imię");
+  assert.equal(zBreloka.body.carriers, undefined, "bez konta nie widać, jakie jeszcze nośniki prowadzą do tej karty");
 
-  assert.equal((await J(`/api/cards/${nowy}/session`, jsonBody("POST", { digest: pinNowy }))).status, 200,
-    "ten sam PIN, skrót przeliczony dla nowego adresu");
-  assert.equal((await J(`/api/cards/${nowy}/session`, jsonBody("POST", { digest: pinStary }))).status, 403,
-    "stary skrót do nowego adresu nie pasuje");
+  const wskaz = await J(`/api/tags/${brelok}`);
+  assert.equal(wskaz.status, 200);
+  assert.deepEqual(wskaz.body, { tagId: tag, kind: "brelok", revoked: false, revokedAt: null },
+    "samo rozwiązanie identyfikatora, bez treści karty");
+  assert.equal((await J("/api/tags/HERO-NIE-MA")).status, 404);
 
-  const nagrobek = await J(`/api/cards/${stary}/session`, jsonBody("POST", { digest: pinStary }));
-  assert.equal(nagrobek.status, 200);
-  assert.deepEqual(nagrobek.body.person, {}, "pod starym adresem nie zostaje treść karty");
-  assert.equal(nagrobek.body.reads.length, 1, "historia odczytów zostaje przy tamtej opasce");
+  assert.equal((await J(`/api/cards/${brelok}/reads`, jsonBody("POST", { by: "ZRM P-3" }))).status, 201);
+  const sesja = await J(`/api/cards/${tag}/session`, jsonBody("POST", { digest: pin }));
+  assert.equal(sesja.body.reads.length, 1, "historia jest przy karcie, nie przy nośniku");
+  assert.deepEqual(sesja.body.carriers.map(n => n.label), ["opaska na rękę", "brelok do kluczy"],
+    "pacjent widzi swoje nośniki po opisie, który sam im nadał");
 
-  assert.equal((await ruch({ tagId: "HERO-6400-KD", pinHash: digest("HERO-6400-KD", "4321") }, pinNowy)).status, 403,
-    "skrótem nowej opaski nie przeniesie się starej");
+  assert.equal((await J(`/api/cards/${tag}/carriers/${brelok}`, { method: "DELETE" })).status, 403);
+  const po = await J(`/api/cards/${tag}/carriers/${brelok}`, { method: "DELETE", headers: { "x-hero-pin": pin } });
+  assert.equal(po.status, 200);
+  assert.match(po.body[1].revokedAt, /^\d{4}-\d{2}-\d{2}T/);
+  assert.equal((await J(`/api/cards/${brelok}`)).status, 410, "zgubiony brelok jest odcięty");
+  assert.equal((await J(`/api/cards/${brelok}/reads`, jsonBody("POST", { by: "ZRM P-4" }))).status, 410);
+  assert.equal((await J(`/api/tags/${brelok}`)).body.revoked, true);
+  assert.equal((await J(`/api/cards/${tag}`)).status, 200, "opaska działa dalej");
+  assert.equal((await J(`/api/cards/${tag}/carriers/HERO-9999-ZZ`, { method: "DELETE", headers: { "x-hero-pin": pin } })).status, 404,
+    "cudzego nośnika nie unieważnisz swoim PIN-em");
+
+  const obcy = "HERO-6400-KD";
+  assert.equal((await dodaj({ tagId: obcy, kind: "karta" }, pin)).status, 201);
+  assert.equal((await J(`/api/cards/${obcy}`, jsonBody("PUT", { ...newCard(), pinHash: digest(obcy, "1111") }))).status, 409,
+    "identyfikator zajęty przez nośnik nie założy pod sobą drugiej karty");
 });
 
 test("token lekarza starszy niż doba przestaje być kontem", async () => {
