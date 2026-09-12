@@ -100,7 +100,15 @@ code,.mono{font-family:var(--f-mono)}
 .nav a[aria-current="page"]{background:var(--brand-soft);color:var(--brand);font-weight:600}
 .chip-mode{font-family:var(--f-mono);font-size:.68rem;letter-spacing:.06em;padding:.2rem .45rem;border:1px solid var(--line-2);border-radius:5px;color:var(--ink-3);white-space:nowrap}
 .chip-mode[data-on="api"]{color:var(--ok);border-color:var(--ok)}
+.lang{display:flex;border:1px solid var(--line-2);border-radius:5px;overflow:hidden}
+.lang button{font-family:var(--f-mono);font-size:.68rem;letter-spacing:.06em;padding:.2rem .45rem;border:0;background:transparent;color:var(--ink-3);cursor:pointer}
+.lang button[aria-pressed="true"]{background:var(--brand);color:#fff}
+.seg{display:flex;flex-wrap:wrap;gap:.4rem}
+.seg button{font-family:var(--f-body);font-size:.92rem;padding:.45rem .8rem;border:1px solid var(--line-2);
+  border-radius:7px;background:var(--surface-2);color:var(--ink);cursor:pointer}
+.seg button[aria-pressed="true"]{background:var(--brand);border-color:var(--brand);color:var(--on-brand);font-weight:600}
 @media (max-width:720px){.topbar .wrap{height:auto;padding-block:.5rem;flex-wrap:wrap}.nav{width:100%;margin-left:0;order:3}.chip-mode{margin-left:auto}}
+@media print{.lang{display:none}}
 
 /* ---------- generic blocks ---------- */
 main{padding-block:2.2rem 3rem;min-height:60vh}
@@ -270,6 +278,9 @@ footer .wrap{display:flex;gap:1.2rem;justify-content:space-between;align-items:c
 </style>
 </head>
 <body>
+<script>/* Motyw ustawiamy przed pierwszym rysowaniem, żeby ciemny wybór nie mrugnął jasnym tłem. */
+  try { var m = localStorage.getItem("hero.theme.v1"); if (m === "light" || m === "dark") document.documentElement.setAttribute("data-theme", m); } catch (e) {}</script>
+
 <svg class="sr" aria-hidden="true"><defs>
 <symbol id="i-nfc" viewBox="0 0 24 24">
   <path d="M7 4.5a11 11 0 0 0 0 15M11 7.2a6 6 0 0 0 0 9.6M15 9.6a2.6 2.6 0 0 0 0 4.8" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
@@ -278,16 +289,21 @@ footer .wrap{display:flex;gap:1.2rem;justify-content:space-between;align-items:c
 
 <header class="topbar">
   <div class="wrap">
-    <a class="brand" href="#/" aria-label="HERO — strona główna">
+    <a class="brand" href="#/" data-t-aria="HERO — strona główna" aria-label="HERO — strona główna">
       <span class="logo logo-hero" role="img" aria-label="HERO"></span>
     </a>
     <nav class="nav" id="nav">
-      <a href="#/">Start</a>
-      <a href="#/karta">Moja karta</a>
-      <a href="#/odczyt">Odczyt ratunkowy</a>
-      <a href="#/lekarz">Panel lekarza</a>
+      <a href="#/" data-t="Start">Start</a>
+      <a href="#/karta" data-t="Moja karta">Moja karta</a>
+      <a href="#/odczyt" data-t="Odczyt ratunkowy">Odczyt ratunkowy</a>
+      <a href="#/lekarz" data-t="Konto zawodowe">Konto zawodowe</a>
+      <a href="#/ustawienia" data-t="Ustawienia">Ustawienia</a>
     </nav>
-    <span class="chip-mode" id="modeChip" title="Gdzie zapisywane są dane">…</span>
+    <div class="lang" id="lang" role="group" data-t-aria="Język strony" aria-label="Język strony">
+      <button type="button" data-lang="pl" aria-pressed="true">PL</button>
+      <button type="button" data-lang="en" aria-pressed="false">EN</button>
+    </div>
+    <span class="chip-mode" id="modeChip" data-t-title="Gdzie zapisywane są dane" title="Gdzie zapisywane są dane">…</span>
   </div>
 </header>
 
@@ -298,11 +314,11 @@ footer .wrap{display:flex;gap:1.2rem;justify-content:space-between;align-items:c
     <div>
       <a class="spacer-link" href="https://kajetan98.github.io/web/">
         <span class="logo logo-spacer" aria-hidden="true"></span>
-        <span class="sr">SPACER — przejdź na stronę zespołu</span>
+        <span class="sr" data-t="SPACER — przejdź na stronę zespołu">SPACER — przejdź na stronę zespołu</span>
       </a>
-      <p class="tiny muted" style="margin-top:.35rem">Zespół projektu HERO i MediTag</p>
+      <p class="tiny muted" style="margin-top:.35rem" data-t="Zespół projektu HERO i MediTag">Zespół projektu HERO i MediTag</p>
     </div>
-    <p class="tiny muted" style="max-width:46ch">HERO — Health Emergency Read Out. Prototyp interfejsu MediTag. Nie jest wyrobem medycznym i nie zastępuje wywiadu ratowniczego.</p>
+    <p class="tiny muted" style="max-width:46ch" data-t="HERO — Health Emergency Read Out. Prototyp interfejsu MediTag. Nie jest wyrobem medycznym i nie zastępuje wywiadu ratowniczego.">HERO — Health Emergency Read Out. Prototyp interfejsu MediTag. Nie jest wyrobem medycznym i nie zastępuje wywiadu ratowniczego.</p>
   </div>
 </footer>
 
@@ -312,10 +328,58 @@ footer .wrap{display:flex;gap:1.2rem;justify-content:space-between;align-items:c
 const view = document.getElementById("view");
 const modeChip = document.getElementById("modeChip");
 const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c] || c));
+
+/* ---------------- język ---------------- */
+/**
+ * Dwa języki: polski jest źródłem, angielski leży w słowniku `EN` na końcu pliku. Kluczem jest
+ * dokładny napis polski — razem z markupem, jeśli literał go niesie — więc brak tłumaczenia
+ * zostawia polski zamiast pustego miejsca. Wybór zapamiętujemy; bez wyboru bierzemy język
+ * przeglądarki, żeby ratownik z angielskim telefonem dostał odczyt po angielsku bez klikania.
+ */
+const LSL = "hero.lang.v1";
+const jezykPrzegladarki = () => /^en\b|^en-/i.test(navigator.language || "") ? "en" : "pl";
+/** Ustawienie z ekranu ustawień: „auto" znaczy „jak w telefonie". */
+const zapamietanyJezyk = () => { try { const z = localStorage.getItem(LSL); if(z === "pl" || z === "en") return z; } catch(e){} return "auto"; };
+let LANG_WYBOR = zapamietanyJezyk();
+let LANG = LANG_WYBOR === "auto" ? jezykPrzegladarki() : LANG_WYBOR;
+const t = pl => (LANG === "en" && EN[pl]) || pl;
+/** Napis z wartościami w miejscach {0}, {1}: w tłumaczeniu mogą stać w innej kolejności. */
+const tf = (pl, ...w) => t(pl).replace(/\{(\d)\}/g, (_, i) => w[Number(i)]);
+/** Funkcja przerysowująca bieżący ekran po zmianie języka. Ekrany, które zapisują odczyt w historii,
+ *  podstawiają tu przerysowanie z już pobranej karty — inaczej zmiana języka dokładałaby wpis. */
+let REPAINT = null;
+
+/* ---------------- motyw ---------------- */
+/**
+ * Trzy stany: „auto" idzie za ustawieniem systemu (`prefers-color-scheme`), a jasny i ciemny
+ * wymusza atrybut `data-theme` na dokumencie — reguły obu motywów siedzą w arkuszu na górze pliku.
+ * Ten sam klucz czyta skrypt w treści strony, żeby ciemny motyw nie mrugnął jasnym tłem przy starcie.
+ */
+const LST = "hero.theme.v1";
+const MOTYWY = ["auto", "light", "dark"];
+const zapamietanyMotyw = () => { try { const z = localStorage.getItem(LST); if(MOTYWY.includes(z)) return z; } catch(e){} return "auto"; };
+let MOTYW = zapamietanyMotyw();
+function malujMotyw(){
+  if(MOTYW === "auto") document.documentElement.removeAttribute("data-theme");
+  else document.documentElement.setAttribute("data-theme", MOTYW);
+}
+function ustawMotyw(wybor){
+  MOTYW = MOTYWY.includes(wybor) ? wybor : "auto";
+  try { MOTYW === "auto" ? localStorage.removeItem(LST) : localStorage.setItem(LST, MOTYW); } catch(e){}
+  malujMotyw();
+}
+/** Zmiana języka: zapamiętanie wyboru i przerysowanie ekranu, na którym stoi użytkownik. */
+function ustawJezyk(wybor){
+  LANG_WYBOR = (wybor === "pl" || wybor === "en") ? wybor : "auto";
+  try { LANG_WYBOR === "auto" ? localStorage.removeItem(LSL) : localStorage.setItem(LSL, LANG_WYBOR); } catch(e){}
+  LANG = LANG_WYBOR === "auto" ? jezykPrzegladarki() : LANG_WYBOR;
+  paintShell();
+  if(REPAINT) REPAINT(); else route();
+}
 const uid = () => Math.random().toString(36).slice(2, 9);
 const nowISO = () => new Date().toISOString();
-const fmtDT = iso => { try { return new Date(iso).toLocaleString("pl-PL", {dateStyle:"short", timeStyle:"short"}); } catch(e){ return iso || "—"; } };
-const fmtD = d => d ? d.split("-").reverse().join(".") : "—";
+const fmtDT = iso => { try { return new Date(iso).toLocaleString(LANG === "en" ? "en-GB" : "pl-PL", {dateStyle:"short", timeStyle:"short"}); } catch(e){ return iso || "—"; } };
+const fmtD = d => d ? d.split("-").reverse().join(LANG === "en" ? "/" : ".") : "—";
 const age = d => { if(!d) return null; const b = new Date(d), n = new Date(); let a = n.getFullYear()-b.getFullYear(); const m = n.getMonth()-b.getMonth(); if(m<0||(m===0&&n.getDate()<b.getDate())) a--; return a>=0&&a<130 ? a : null; };
 function formErr(id, text){ const el = document.getElementById(id); if(el) el.textContent = text || ""; }
 
@@ -333,7 +397,42 @@ function toast(msg){ const t=document.createElement("div"); t.className="toast";
 const LS = "hero.cards.v1";
 const LSD = "hero.doctors.v1";
 const LSO = "hero.owners.v1";
+const LSC = "hero.carriers.v1";
+/**
+ * Słownictwo danych. Te napisy zapisują się w karcie po polsku (bo to wartości, nie etykiety),
+ * a na ekran idą przez `t(wartość)` — czyli przez zmienną, nie przez literał. Lista jest tutaj,
+ * żeby test i18n miał czego szukać w słowniku; kod używa jej wprost tylko w `T_DANE`.
+ */
+const T_DANE = [
+  "Dane podstawowe", "Alergie", "Leki", "Choroby", "Kontakty", "Nośniki", "Historia odczytów",
+  "łagodna", "umiarkowana", "ciężka", "anafilaksja",
+  "aktywna", "kontrolowana", "przebyta",
+  "lek", "pokarm", "inne",
+  "doustnie", "podskórnie", "dożylnie", "domięśniowo", "wziewnie", "przezskórnie",
+  "Opaska na rękę", "Brelok do kluczy", "Karta do portfela",
+  "odczyt ratunkowy", "dostęp lekarza", "dostęp ratownika",
+  "pacjent", "lekarz", "ratownik", "przykład",
+];
+/* Rodzaje nośnika — ta sama lista co w server/db.js. Opaska dla osób starszych i dla dzieci,
+   brelok do kluczy dla tych, którzy opaski nie założą, karta do portfela jako zapas bez baterii. */
+const KIND = [["opaska","Opaska na rękę"],["brelok","Brelok do kluczy"],["karta","Karta do portfela"]];
+const kindName = k => t((KIND.find(x => x[0] === k) || KIND[0])[1]);
+/* Zdania z nazwą nośnika są w słowniku w całości: polski odmienia rzeczownik przez przypadki,
+   a inne języki nie, więc sklejanie ich z kawałków dawałoby kalekie tłumaczenia. */
+const opisZblizenia = k => k === "brelok" ? t("odczyt po zbliżeniu breloka")
+  : k === "karta" ? t("odczyt po zbliżeniu karty") : t("odczyt po zbliżeniu opaski");
+const prosbaOZblizenie = k => k === "brelok" ? t("Przyłóż brelok do telefonu i przytrzymaj chwilę…")
+  : k === "karta" ? t("Przyłóż kartę do telefonu i przytrzymaj chwilę…") : t("Przyłóż opaskę do telefonu i przytrzymaj chwilę…");
 const PWZ_RE = /^[0-9]{7}$/;
+/* Numer w rejestrze ratowników medycznych nie ma ustalonego formatu — sprawdzamy długość i znaki. */
+const RATOWNIK_RE = /^[A-Za-z0-9/-]{4,20}$/;
+/** Jak konto podpisuje się w historii odczytów i pod wpisem. */
+const kontoOpis = k => k && k.role === "ratownik"
+  ? tf("{0}, ratownik medyczny nr {1}", k.name, k.pwz)
+  : k ? tf("{0}, PWZ {1}", k.name, k.pwz) : "";
+const kontoRola = k => (k && k.role === "ratownik") ? "ratownik" : "lekarz";
+/** Kontekst wpisu w historii — ta sama nazwa, co po stronie serwera. */
+const readCtx = k => kontoRola(k) === "ratownik" ? "dostęp ratownika" : "dostęp lekarza";
 let API = false;      /* true, gdy odpowiada serwer HERO */
 let PIN_DG = null;    /* skrót PIN-u bieżącej sesji, wysyłany przy zapisie */
 let DOCTOR = null;    /* zalogowane konto lekarza: {token, name, pwz} */
@@ -351,6 +450,23 @@ async function digest(tagId, pin){
 function lsAll(){ try { return JSON.parse(localStorage.getItem(LS) || "{}"); } catch(e){ return {}; } }
 function lsSave(all){ try { localStorage.setItem(LS, JSON.stringify(all)); } catch(e){} }
 function lsDocs(){ try { return JSON.parse(localStorage.getItem(LSD) || "{}"); } catch(e){ return {}; } }
+function lsCarriers(){ try { return JSON.parse(localStorage.getItem(LSC) || "{}"); } catch(e){ return {}; } }
+function lsCarriersSave(all){ try { localStorage.setItem(LSC, JSON.stringify(all)); } catch(e){} }
+/**
+ * Nośniki karty w trybie bez serwera. Adres własny karty jest pierwszym nośnikiem także tutaj;
+ * karty założone przed rejestrem dostają swój wiersz przy pierwszym otwarciu.
+ */
+function localCarriers(cardId){
+  const all = lsCarriers();
+  if(!all[cardId]){
+    const c = lsAll()[cardId];
+    if(!c) return [];
+    all[cardId] = {tagId:cardId, cardId, kind:"opaska", label:"", createdAt:c.updatedAt || nowISO(), revokedAt:c.revokedAt || null};
+    lsCarriersSave(all);
+  }
+  return Object.values(all).filter(n => n.cardId === cardId)
+    .sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
+}
 function lsDocsSave(all){ try { localStorage.setItem(LSD, JSON.stringify(all)); } catch(e){} }
 
 /**
@@ -387,6 +503,7 @@ function blankCard(tagId){
 }
 /* KARTA:START — co i w jakiej kolejności widzi ratownik. Blok bez DOM-u, bo to jedyne miejsce,
    które decyduje o zawartości odczytu ratunkowego; test/karta.test.js wycina go z tego pliku. */
+/* Wartości zapisane w karcie zostają po polsku — tłumaczy się to, co widać na ekranie. */
 const SEV = {1:"łagodna", 2:"umiarkowana", 3:"ciężka", 4:"anafilaksja"};
 
 /**
@@ -405,6 +522,28 @@ function critical(card){
   };
 }
 
+/**
+ * Zestaw ratunkowy: to, co serwer HERO wydaje bez konta zawodowego. Odpada wszystko, co wskazuje
+ * na osobę — nazwisko, data urodzenia, kontakty alarmowe — a z leków zostają same antykoagulanty.
+ * Egzekwuje to serwer w `rescueCard`; ta kopia obsługuje tryb bez serwera, żeby zakres był ten sam.
+ */
+function rescueOf(card){
+  const p = card.person || {};
+  return {
+    tagId: card.tagId,
+    rescue: true,
+    person: {
+      blood: p.blood || "", rh: p.rh || "", weightKg: p.weightKg || "", heightCm: p.heightCm || "",
+      langs: p.langs || "", devices: p.devices || "", note: p.note || "",
+      dnr: !!p.dnr, donor: !!p.donor, ageYears: age(p.birthDate),
+    },
+    allergies: (card.allergies || []).slice(),
+    meds: (card.meds || []).filter(m => m && m.anticoag),
+    conditions: (card.conditions || []).filter(c => c && c.status !== "przebyta"),
+    updatedAt: card.updatedAt, updatedBy: card.updatedBy,
+  };
+}
+
 const waga = a => Number(a && a.severity) || 1;
 /** Alergie malejąco po nasileniu: anafilaksja ma być pierwsza, nie gdziekolwiek. */
 const roAllergies = card => (card.allergies || []).slice().sort((x, y) => waga(y) - waga(x));
@@ -419,11 +558,11 @@ function roFlags(card){
   const p = card.person || {};
   const anafilaksja = roAllergies(card).filter(x => waga(x) >= 3);
   const krzepnienie = roMeds(card).filter(m => m.anticoag);
-  const flagi = anafilaksja.map(x => ({ waga: "crit", tekst: "Anafilaksja: " + x.allergen }));
-  if(krzepnienie.length) flagi.push({ waga: "crit", tekst: "Antykoagulant: " + krzepnienie.map(m => m.name).join(", ") });
-  if(p.devices) flagi.push({ waga: "warn", tekst: "Wszczep / urządzenie" });
-  if(p.dnr) flagi.push({ waga: "crit", tekst: "DNR — zgłoszone oświadczenie" });
-  if(p.donor) flagi.push({ waga: "ok", tekst: "Dawca narządów" });
+  const flagi = anafilaksja.map(x => ({ waga: "crit", tekst: tf("Anafilaksja: {0}", x.allergen) }));
+  if(krzepnienie.length) flagi.push({ waga: "crit", tekst: tf("Antykoagulant: {0}", krzepnienie.map(m => m.name).join(", ")) });
+  if(p.devices) flagi.push({ waga: "warn", tekst: t("Wszczep / urządzenie") });
+  if(p.dnr) flagi.push({ waga: "crit", tekst: t("DNR — zgłoszone oświadczenie") });
+  if(p.donor) flagi.push({ waga: "ok", tekst: t("Dawca narządów") });
   return flagi;
 }
 
@@ -431,16 +570,17 @@ function roFlags(card){
 function handoverText(card, lat){
   const p = card.person || {};
   const L = [];
-  L.push("HERO — karta ratunkowa MediTag " + card.tagId);
-  L.push("Pacjent: " + (p.name || "nieznany") + (lat != null ? ", " + lat + " lat" : "")
-    + (p.blood ? ", grupa " + p.blood + (p.rh || "") : ""));
-  L.push("Alergie: " + (roAllergies(card).map(x => x.allergen + " (" + SEV[waga(x)] + ")").join("; ") || "brak zgłoszonych"));
-  L.push("Leki: " + (roMeds(card).map(m => m.name + " " + (m.dose || "") + (m.anticoag ? " [ANTYKOAGULANT]" : "")).join("; ") || "brak zgłoszonych"));
-  L.push("Choroby: " + ((card.conditions || []).map(c => c.name + (c.icd10 ? " (" + c.icd10 + ")" : "")).join("; ") || "brak zgłoszonych"));
-  if(p.devices) L.push("Wszczepy/urządzenia: " + p.devices);
-  if(p.dnr) L.push("UWAGA: zgłoszone oświadczenie DNR");
+  L.push(tf("HERO — karta ratunkowa MediTag {0}", card.tagId));
+  if(card.rescue) L.push(t("Zakres: zestaw ratunkowy — bez nazwiska, kontaktów i pełnej listy rozpoznań"));
+  L.push(tf("Pacjent: {0}", p.name || t("nieznany")) + (lat != null ? tf(", {0} lat", lat) : "")
+    + (p.blood ? tf(", grupa {0}", p.blood + (p.rh || "")) : ""));
+  L.push(tf("Alergie: {0}", roAllergies(card).map(x => x.allergen + " (" + t(SEV[waga(x)]) + ")").join("; ") || t("brak zgłoszonych")));
+  L.push(tf("Leki: {0}", roMeds(card).map(m => m.name + " " + (m.dose || "") + (m.anticoag ? " [" + t("ANTYKOAGULANT") + "]" : "")).join("; ") || t("brak zgłoszonych")));
+  L.push(tf("Choroby: {0}", (card.conditions || []).map(c => c.name + (c.icd10 ? " (" + c.icd10 + ")" : "")).join("; ") || t("brak zgłoszonych")));
+  if(p.devices) L.push(tf("Wszczepy/urządzenia: {0}", p.devices));
+  if(p.dnr) L.push(t("UWAGA: zgłoszone oświadczenie DNR"));
   const k = (card.contacts || []).find(x => x.primary) || (card.contacts || [])[0];
-  if(k) L.push("Kontakt: " + k.name + " (" + (k.relation || "") + ") " + k.phone);
+  if(k) L.push(tf("Kontakt: {0} ({1}) {2}", k.name, k.relation || "", k.phone));
   return L.join("\n");
 }
 /* KARTA:END */
@@ -454,15 +594,41 @@ const store = {
    */
   async get(tagId){
     if(API){
-      const r = await fetch(api("cards/" + encodeURIComponent(tagId)));
+      /* Z kontem zawodowym serwer oddaje kartę w całości i zapisuje odczyt w historii. Bez konta —
+         sam zestaw ratunkowy, oznaczony polem `rescue`. */
+      const r = await fetch(api("cards/" + encodeURIComponent(tagId)), {headers: docHeader()});
       if(r.status === 410){ const j = await r.json().catch(() => ({})); return {tagId, revoked:true, revokedAt:j.revokedAt || null}; }
       if(!r.ok) return null;
       return r.json();
     }
-    const c = lsAll()[tagId];
+    const n = lsCarriers()[tagId];
+    const id = n ? n.cardId : tagId;
+    const c = lsAll()[id];
     if(!c) return null;
-    if(c.revokedAt) return {tagId, revoked:true, revokedAt:c.revokedAt};
-    return c;
+    const odciety = (n && n.revokedAt) || c.revokedAt;
+    if(odciety) return {tagId, revoked:true, revokedAt:odciety};
+    /* Bez serwera karta leży w tej przeglądarce, więc nie ma czego egzekwować. Zakres pokazujemy
+       jednak ten sam, co serwer wydaje bez konta — inaczej demonstracja kłamałaby o dostępie. */
+    const karta = DOCTOR ? Object.assign({}, c, {carriers: localCarriers(id)}) : rescueOf(c);
+    karta.carrier = {tagId, kind: n ? n.kind : "opaska"};
+    return karta;
+  },
+  /**
+   * Identyfikator z nośnika → adres karty, do której prowadzi. Skrót PIN-u wiąże się z adresem
+   * karty, nie nośnika, więc każde wejście po PIN-ie zaczyna się od tego pytania.
+   */
+  async resolve(tagId){
+    if(API){
+      const r = await fetch(api("tags/" + encodeURIComponent(tagId)));
+      if(!r.ok) return null;
+      return r.json();
+    }
+    const n = lsCarriers()[tagId];
+    const id = n ? n.cardId : tagId;
+    const c = lsAll()[id];
+    if(!c) return null;
+    const odciety = (n && n.revokedAt) || c.revokedAt || null;
+    return {tagId:id, kind: n ? n.kind : "opaska", revoked: !!odciety, revokedAt: odciety};
   },
   async list(){
     if(API){ const r = await fetch(api("cards")); if(!r.ok) return []; return r.json(); }
@@ -481,7 +647,8 @@ const store = {
     const c = lsAll()[tagId];
     if(!c) return {ok:false, reason:"nieznany"};
     if(c.pinHash && c.pinHash !== dg) return {ok:false, reason:"pin"};
-    PIN_DG = dg; return {ok:true, card:c};
+    PIN_DG = dg;
+    return {ok:true, card: Object.assign({}, c, {carriers: localCarriers(tagId)})};
   },
   async verify(tagId, pin){ return this.openWithDigest(tagId, await digest(tagId, pin)); },
   async save(card){
@@ -490,11 +657,14 @@ const store = {
       const r = await fetch(api("cards/" + encodeURIComponent(card.tagId)), {method:"PUT",
         headers: Object.assign({"content-type":"application/json", "x-hero-pin": PIN_DG || ""}, docHeader()),
         body: JSON.stringify(card)});
-      if(!r.ok) throw new Error("Serwer odrzucił zapis (" + r.status + ")");
+      if(!r.ok) throw new Error(t("Serwer odrzucił zapis (") + r.status + ")");
       /* Serwer oddaje kartę po swojemu: to on nadaje podpisy, więc bierzemy jego wersję. */
       return await r.json();
     }
-    const all = lsAll(); all[card.tagId] = card; lsSave(all); return card;
+    /* Lista nośników ma jedno miejsce (`hero.carriers.v1`), więc nie odkłada się w treści karty. */
+    const { carriers, carrier, ...tresc } = card;
+    const all = lsAll(); all[card.tagId] = tresc; lsSave(all);
+    return Object.assign({}, tresc, {carriers: localCarriers(card.tagId)});
   },
   async remove(tagId){
     if(API){ await fetch(api("cards/" + encodeURIComponent(tagId)), {method:"DELETE", headers:{"x-hero-pin": PIN_DG || ""}}); return; }
@@ -508,10 +678,10 @@ const store = {
         body: JSON.stringify({pinHash:nowyDigest})});
       if(r.status === 204) return {ok:true};
       const j = await r.json().catch(() => ({}));
-      return {ok:false, error: j.error || "Serwer odrzucił zmianę PIN-u (" + r.status + ")"};
+      return {ok:false, error: j.error || t("Serwer odrzucił zmianę PIN-u (") + r.status + ")"};
     }
     const all = lsAll(), c = all[tagId];
-    if(!c) return {ok:false, error:"Nie ma karty o tym identyfikatorze"};
+    if(!c) return {ok:false, error:t("Nie ma karty o tym identyfikatorze")};
     c.pinHash = nowyDigest;
     lsSave(all);
     return {ok:true};
@@ -521,40 +691,50 @@ const store = {
     if(API){
       const r = await fetch(api("cards/" + encodeURIComponent(tagId) + "/revoke"), {method:"POST", headers:{"x-hero-pin": PIN_DG || ""}});
       const j = await r.json().catch(() => ({}));
-      if(!r.ok) return {ok:false, error: j.error || "Serwer odrzucił unieważnienie (" + r.status + ")"};
+      if(!r.ok) return {ok:false, error: j.error || t("Serwer odrzucił unieważnienie (") + r.status + ")"};
       return {ok:true, revokedAt: j.revokedAt};
     }
     const all = lsAll(), c = all[tagId];
-    if(!c) return {ok:false, error:"Nie ma karty o tym identyfikatorze"};
+    if(!c) return {ok:false, error:t("Nie ma karty o tym identyfikatorze")};
     c.revokedAt = c.revokedAt || nowISO();
     lsSave(all);
     return {ok:true, revokedAt: c.revokedAt};
   },
   /**
-   * Przeniesienie karty na nową opaskę. Skrót PIN-u wiąże się z identyfikatorem opaski, więc nowy
-   * adres wymaga skrótu przeliczonego dla niego — dlatego przeniesienie pyta o PIN jeszcze raz.
+   * Nowy nośnik tej samej karty: druga opaska, brelok do kluczy, karta do portfela. Skrótu PIN-u
+   * nie trzeba przeliczać — adres własny karty się nie zmienia, nośnik tylko na nią wskazuje.
    */
-  async move(tagId, nowy, dgNowy){
+  async addCarrier(cardId, {tagId, kind, label}){
     if(API){
-      const r = await fetch(api("cards/" + encodeURIComponent(tagId) + "/move"), {method:"POST",
+      const r = await fetch(api("cards/" + encodeURIComponent(cardId) + "/carriers"), {method:"POST",
         headers:{"content-type":"application/json", "x-hero-pin": PIN_DG || ""},
-        body: JSON.stringify({tagId:nowy, pinHash:dgNowy})});
+        body: JSON.stringify({tagId, kind, label})});
       const j = await r.json().catch(() => ({}));
-      if(!r.ok) return {ok:false, error: j.error || "Serwer odrzucił przeniesienie (" + r.status + ")"};
-      return {ok:true, card:j};
+      if(!r.ok) return {ok:false, error: j.error || t("Serwer odrzucił nowy nośnik (") + r.status + ")"};
+      return {ok:true, carriers:j};
     }
-    const all = lsAll(), c = all[tagId];
-    if(!c) return {ok:false, error:"Nie ma karty o tym identyfikatorze"};
-    if(all[nowy]) return {ok:false, error:"Karta o tym identyfikatorze już istnieje"};
-    const kopia = JSON.parse(JSON.stringify(c));
-    kopia.tagId = nowy; kopia.pinHash = dgNowy; kopia.reads = []; kopia.demo = false;
-    delete kopia.revokedAt;
-    all[nowy] = kopia;
-    /* Pod starym adresem zostaje nagrobek: historia odczytów tamtej opaski, bez treści karty. */
-    c.revokedAt = nowISO();
-    c.person = {}; c.allergies = []; c.meds = []; c.conditions = []; c.contacts = [];
-    lsSave(all);
-    return {ok:true, card:kopia};
+    const all = lsCarriers();
+    if(all[tagId] || lsAll()[tagId]) return {ok:false, error:t("Ten identyfikator jest już zajęty")};
+    localCarriers(cardId);
+    const zapis = lsCarriers();
+    zapis[tagId] = {tagId, cardId, kind, label, createdAt: nowISO(), revokedAt: null};
+    lsCarriersSave(zapis);
+    return {ok:true, carriers: localCarriers(cardId)};
+  },
+  /** Unieważnienie jednego nośnika. Karta i pozostałe nośniki zostają. Nieodwracalne. */
+  async revokeCarrier(cardId, tagId){
+    if(API){
+      const r = await fetch(api("cards/" + encodeURIComponent(cardId) + "/carriers/" + encodeURIComponent(tagId)),
+        {method:"DELETE", headers:{"x-hero-pin": PIN_DG || ""}});
+      const j = await r.json().catch(() => ({}));
+      if(!r.ok) return {ok:false, error: j.error || t("Serwer odrzucił unieważnienie (") + r.status + ")"};
+      return {ok:true, carriers:j};
+    }
+    const all = lsCarriers();
+    if(!all[tagId] || all[tagId].cardId !== cardId) return {ok:false, error:t("Ta karta nie ma takiego nośnika")};
+    all[tagId].revokedAt = all[tagId].revokedAt || nowISO();
+    lsCarriersSave(all);
+    return {ok:true, carriers: localCarriers(cardId)};
   },
   async logRead(tagId, by, ctx){
     const payload = {by: by || "nieznany czytnik", ctx: ctx || "odczyt ratunkowy"};
@@ -565,7 +745,9 @@ const store = {
       return Object.assign({id:uid(), at:nowISO()}, payload);
     }
     const entry = Object.assign({id:uid(), at:nowISO()}, payload);
-    const all = lsAll(); const c = all[tagId]; if(!c) return entry;
+    /* Bez serwera nośnik trzeba rozwiązać samemu: historia należy do karty, nie do breloka. */
+    const n = lsCarriers()[tagId];
+    const all = lsAll(); const c = all[n ? n.cardId : tagId]; if(!c) return entry;
     c.reads = [entry].concat(c.reads || []).slice(0, 50); lsSave(all); return entry;
   }
 };
@@ -578,21 +760,23 @@ const docHeader = () => (API && DOCTOR && DOCTOR.token) ? {"x-hero-doctor": DOCT
  * przeglądarki i podpis jest tylko etykietą: nie ma czego egzekwować.
  */
 const doctors = {
-  async register({pwz, name, password}){
+  async register({pwz, name, password, role}){
     const numer = String(pwz || "").trim(), imie = String(name || "").trim();
-    if(!PWZ_RE.test(numer)) return {ok:false, error:"Numer PWZ składa się z siedmiu cyfr"};
-    if(imie.length < 3) return {ok:false, error:"Podaj imię i nazwisko"};
-    if(String(password || "").length < 8) return {ok:false, error:"Hasło musi mieć co najmniej 8 znaków"};
+    const rola = role === "ratownik" ? "ratownik" : "lekarz";
+    if(rola === "lekarz" && !PWZ_RE.test(numer)) return {ok:false, error:t("Numer PWZ składa się z siedmiu cyfr")};
+    if(rola === "ratownik" && !RATOWNIK_RE.test(numer)) return {ok:false, error:t("Numer ratownika ma od 4 do 20 znaków")};
+    if(imie.length < 3) return {ok:false, error:t("Podaj imię i nazwisko")};
+    if(String(password || "").length < 8) return {ok:false, error:t("Hasło musi mieć co najmniej 8 znaków")};
     if(API){
       const r = await fetch(api("doctors"), {method:"POST", headers:{"content-type":"application/json"},
-        body: JSON.stringify({pwz:numer, name:imie, password})});
+        body: JSON.stringify({pwz:numer, name:imie, password, role:rola})});
       if(r.ok) return {ok:true};
       const j = await r.json().catch(() => ({}));
-      return {ok:false, error: j.error || "Nie udało się założyć konta"};
+      return {ok:false, error: j.error || t("Nie udało się założyć konta")};
     }
     const all = lsDocs();
-    if(all[numer]) return {ok:false, error:"Konto z tym numerem PWZ już istnieje"};
-    all[numer] = {pwz:numer, name:imie, pass: await digest("pwz:" + numer, password)};
+    if(all[numer]) return {ok:false, error:t("Konto z tym numerem już istnieje")};
+    all[numer] = {pwz:numer, name:imie, role:rola, pass: await digest("pwz:" + numer, password)};
     lsDocsSave(all);
     return {ok:true};
   },
@@ -601,15 +785,15 @@ const doctors = {
     if(API){
       const r = await fetch(api("doctors/session"), {method:"POST", headers:{"content-type":"application/json"},
         body: JSON.stringify({pwz:numer, password})});
-      if(!r.ok) return {ok:false, error:"Nieprawidłowy numer PWZ albo hasło"};
+      if(!r.ok) return {ok:false, error:t("Nieprawidłowy numer albo hasło")};
       const j = await r.json();
-      DOCTOR = {token:j.token, name:j.doctor.name, pwz:j.doctor.pwz};
+      DOCTOR = {token:j.token, name:j.doctor.name, pwz:j.doctor.pwz, role:j.doctor.role || "lekarz"};
       ses.doctor(DOCTOR);
       return {ok:true};
     }
     const rec = lsDocs()[numer];
-    if(!rec || rec.pass !== await digest("pwz:" + numer, password)) return {ok:false, error:"Nieprawidłowy numer PWZ albo hasło"};
-    DOCTOR = {token:null, name:rec.name, pwz:rec.pwz};
+    if(!rec || rec.pass !== await digest("pwz:" + numer, password)) return {ok:false, error:t("Nieprawidłowy numer albo hasło")};
+    DOCTOR = {token:null, name:rec.name, pwz:rec.pwz, role:rec.role || "lekarz"};
     ses.doctor(DOCTOR);
     return {ok:true};
   },
@@ -622,6 +806,7 @@ const doctors = {
       if(!r || !r.ok){ ses.doctor(null); DOCTOR = null; return null; }
       const j = await r.json().catch(() => ({}));
       saved.sessions = j.sessions;
+      if(j.role) saved.role = j.role;
     }
     DOCTOR = saved;
     return DOCTOR;
@@ -945,7 +1130,7 @@ function qrSvg(tekst, opis){
   let sciezka = "";
   for(let y = 0; y < n; y++) for(let x = 0; x < n; x++)
     if(mod[y][x]) sciezka += "M" + (x + cisza) + " " + (y + cisza) + "h1v1h-1z";
-  return '<svg class="qr" viewBox="0 0 ' + bok + ' ' + bok + '" role="img" aria-label="' + (opis || "Kod QR z adresem karty")
+  return '<svg class="qr" viewBox="0 0 ' + bok + ' ' + bok + '" role="img" aria-label="' + (opis || t("Kod QR z adresem karty"))
     + '" shape-rendering="crispEdges"><rect width="' + bok + '" height="' + bok + '" fill="#fff"/>'
     + '<path d="' + sciezka + '" fill="#000"/></svg>';
 }
@@ -963,11 +1148,11 @@ function nfcCtl(){ nfcStop(); NFC_CTL = new AbortController(); return NFC_CTL; }
 function nfcErr(e){
   switch(e && e.name){
     case "AbortError": return "Przerwano.";
-    case "NotAllowedError": return "Przeglądarka nie dostała zgody na NFC. Zezwól na dostęp i spróbuj ponownie.";
-    case "NotSupportedError": return "To urządzenie nie udostępnia NFC albo moduł jest wyłączony w ustawieniach.";
-    case "NotReadableError": return "Nie udało się sięgnąć do opaski. Sprawdź, czy NFC jest włączone.";
-    case "NetworkError": return "Opaska odsunęła się w trakcie. Przyłóż ją ponownie i przytrzymaj chwilę.";
-    default: return (e && e.message) || "Nie udało się porozumieć z opaską.";
+    case "NotAllowedError": return t("Przeglądarka nie dostała zgody na NFC. Zezwól na dostęp i spróbuj ponownie.");
+    case "NotSupportedError": return t("To urządzenie nie udostępnia NFC albo moduł jest wyłączony w ustawieniach.");
+    case "NotReadableError": return t("Nie udało się sięgnąć do opaski. Sprawdź, czy NFC jest włączone.");
+    case "NetworkError": return t("Opaska odsunęła się w trakcie. Przyłóż ją ponownie i przytrzymaj chwilę.");
+    default: return (e && e.message) || t("Nie udało się porozumieć z opaską.");
   }
 }
 function tagFromMessage(msg){
@@ -1021,27 +1206,27 @@ async function ensureExample(){
   const c = blankCard("HERO-2481-KX");
   c.demo = true;
   c.pinHash = await digest(c.tagId, "1234");
-  c.person = { name:"Anna Wiśniewska", birthDate:"1968-03-14", blood:"A", rh:"+", weightKg:"72", heightCm:"165",
-    langs:"pl, en", devices:"Stymulator serca Medtronic, wszczepiony 2021 — nie stosować diatermii jednobiegunowej",
-    dnr:false, donor:true, note:"Trudny dostęp dożylny — preferowana prawa kończyna górna." };
+  c.person = { name:t("Anna Wiśniewska"), birthDate:"1968-03-14", blood:"A", rh:"+", weightKg:"72", heightCm:"165",
+    langs:"pl, en", devices:t("Stymulator serca Medtronic, wszczepiony 2021 — nie stosować diatermii jednobiegunowej"),
+    dnr:false, donor:true, note:t("Trudny dostęp dożylny — preferowana prawa kończyna górna.") };
   c.allergies = [
-    {id:uid(), allergen:"Penicylina", kind:"lek", reaction:"Obrzęk krtani, spadek ciśnienia", severity:4, source:"lekarz", note:"Potwierdzone testami 2019", signedBy:podpis},
-    {id:uid(), allergen:"Jad osy", kind:"inne", reaction:"Wstrząs anafilaktyczny", severity:4, source:"pacjent", note:"Nosi adrenalinę w ampułko-strzykawce"},
-    {id:uid(), allergen:"Orzechy ziemne", kind:"pokarm", reaction:"Pokrzywka, duszność", severity:3, source:"pacjent", note:""}
+    {id:uid(), allergen:"Penicylina", kind:"lek", reaction:t("Obrzęk krtani, spadek ciśnienia"), severity:4, source:"lekarz", note:"Potwierdzone testami 2019", signedBy:podpis},
+    {id:uid(), allergen:"Jad osy", kind:"inne", reaction:t("Wstrząs anafilaktyczny"), severity:4, source:"pacjent", note:t("Nosi adrenalinę w ampułko-strzykawce")},
+    {id:uid(), allergen:"Orzechy ziemne", kind:"pokarm", reaction:t("Pokrzywka, duszność"), severity:3, source:"pacjent", note:""}
   ];
   c.meds = [
-    {id:uid(), name:"Rywaroksaban", atc:"B01AF01", dose:"20 mg", freq:"1× dziennie, wieczorem", route:"doustnie", since:"2021-06", anticoag:true, source:"lekarz", note:"Migotanie przedsionków", signedBy:podpis},
+    {id:uid(), name:"Rywaroksaban", atc:"B01AF01", dose:"20 mg", freq:"1× dziennie, wieczorem", route:"doustnie", since:"2021-06", anticoag:true, source:"lekarz", note:t("Migotanie przedsionków"), signedBy:podpis},
     {id:uid(), name:"Metformina", atc:"A10BA02", dose:"1000 mg", freq:"2× dziennie", route:"doustnie", since:"2016-02", anticoag:false, source:"lekarz", note:"", signedBy:podpis},
-    {id:uid(), name:"Lewotyroksyna", atc:"H03AA01", dose:"75 µg", freq:"rano na czczo", route:"doustnie", since:"2014-11", anticoag:false, source:"pacjent", note:""}
+    {id:uid(), name:"Lewotyroksyna", atc:"H03AA01", dose:"75 µg", freq:t("rano na czczo"), route:"doustnie", since:"2014-11", anticoag:false, source:"pacjent", note:""}
   ];
   c.conditions = [
-    {id:uid(), name:"Migotanie przedsionków", icd10:"I48", since:"2021", status:"aktywna", source:"lekarz", note:"Utrwalone, kontrola rytmu", signedBy:podpis},
+    {id:uid(), name:t("Migotanie przedsionków"), icd10:"I48", since:"2021", status:"aktywna", source:"lekarz", note:"Utrwalone, kontrola rytmu", signedBy:podpis},
     {id:uid(), name:"Cukrzyca typu 2", icd10:"E11", since:"2016", status:"kontrolowana", source:"lekarz", note:"HbA1c 6,8%", signedBy:podpis},
-    {id:uid(), name:"Niedoczynność tarczycy", icd10:"E03", since:"2014", status:"kontrolowana", source:"pacjent", note:""}
+    {id:uid(), name:t("Niedoczynność tarczycy"), icd10:"E03", since:"2014", status:"kontrolowana", source:"pacjent", note:""}
   ];
   c.contacts = [
-    {id:uid(), name:"Marek Wiśniewski", relation:"mąż", phone:"+48 601 234 567", primary:true},
-    {id:uid(), name:"dr Tomasz Lewandowski", relation:"lekarz prowadzący, kardiolog", phone:"+48 22 555 12 34", primary:false}
+    {id:uid(), name:t("Marek Wiśniewski"), relation:t("mąż"), phone:"+48 601 234 567", primary:true},
+    {id:uid(), name:"dr Tomasz Lewandowski", relation:t("lekarz prowadzący, kardiolog"), phone:"+48 22 555 12 34", primary:false}
   ];
   c.updatedBy = "przykład";
   const map = {}; map[c.tagId] = c; lsSave(map);
@@ -1059,44 +1244,44 @@ const ses = {
 };
 
 /* ---------------- shared render helpers ---------------- */
-function sevTag(s){ const n = Number(s)||1; return '<span class="tag ' + (n>=3?"tag-crit":n===2?"tag-warn":"tag-ok") + '">' + esc(SEV[n]) + "</span>"; }
+function sevTag(s){ const n = Number(s)||1; return '<span class="tag ' + (n>=3?"tag-crit":n===2?"tag-warn":"tag-ok") + '">' + esc(t(SEV[n])) + "</span>"; }
 function sigTag(e){
   return e && e.signedBy
-    ? '<span class="tag tag-brand" title="Wpis podpisany kontem lekarza">' + esc(e.signedBy.name) + ' · PWZ ' + esc(e.signedBy.pwz) + '</span>'
+    ? '<span class="tag tag-brand" title="'+esc(t("Wpis podpisany kontem lekarza"))+'">' + esc(e.signedBy.name) + ' · ' + esc(tf("PWZ {0}", e.signedBy.pwz)) + '</span>'
     : "";
 }
 function srcTag(e){
   if(e && e.signedBy) return sigTag(e);
-  if(e && e.source === "lekarz") return '<span class="tag tag-brand">zweryfikowane przez lekarza</span>';
-  return '<span class="tag">wpis pacjenta</span>';
+  if(e && e.source === "lekarz") return '<span class="tag tag-brand">'+esc(t("zweryfikowane przez lekarza"))+'</span>';
+  return '<span class="tag">'+esc(t("wpis pacjenta"))+'</span>';
 }
 
 function allergyRow(a){
   const n = Number(a.severity)||1;
   return '<div class="rec s'+n+'" data-id="'+esc(a.id)+'">'
-    + '<div class="main"><div class="name">'+esc(a.allergen)+' '+sevTag(n)+'<span class="tag">'+esc(a.kind)+'</span>'+srcTag(a)+'</div>'
-    + '<div class="meta">'+esc(a.reaction || "Reakcja nieopisana")+(a.note?' · '+esc(a.note):"")+'</div></div>'
-    + '<div class="acts"><button class="btn btn-ghost btn-sm" data-act="edit">Edytuj</button><button class="btn btn-ghost btn-sm" data-act="del">Usuń</button></div></div>';
+    + '<div class="main"><div class="name">'+esc(a.allergen)+' '+sevTag(n)+'<span class="tag">'+esc(t(a.kind))+'</span>'+srcTag(a)+'</div>'
+    + '<div class="meta">'+esc(a.reaction || t("Reakcja nieopisana"))+(a.note?' · '+esc(a.note):"")+'</div></div>'
+    + t('<div class="acts"><button class="btn btn-ghost btn-sm" data-act="edit">Edytuj</button><button class="btn btn-ghost btn-sm" data-act="del">Usuń</button></div></div>');
 }
 function medRow(m){
   return '<div class="rec '+(m.anticoag?"s3":"")+'" data-id="'+esc(m.id)+'">'
-    + '<div class="main"><div class="name">'+esc(m.name)+(m.anticoag?' <span class="tag tag-crit">antykoagulant</span>':"")+srcTag(m)+'</div>'
-    + '<div class="meta">'+esc([m.dose, m.freq, m.route].filter(Boolean).join(" · ") || "dawkowanie nieokreślone")
-    + (m.atc?' <span class="code">ATC '+esc(m.atc)+'</span>':"")+(m.since?' · od '+esc(m.since):"")+(m.note?' · '+esc(m.note):"")+'</div></div>'
-    + '<div class="acts"><button class="btn btn-ghost btn-sm" data-act="edit">Edytuj</button><button class="btn btn-ghost btn-sm" data-act="del">Usuń</button></div></div>';
+    + '<div class="main"><div class="name">'+esc(m.name)+(m.anticoag?' <span class="tag tag-crit">'+esc(t("antykoagulant"))+'</span>':"")+srcTag(m)+'</div>'
+    + '<div class="meta">'+esc([m.dose, m.freq, t(m.route)].filter(Boolean).join(" · ") || t("dawkowanie nieokreślone"))
+    + (m.atc?' <span class="code">ATC '+esc(m.atc)+'</span>':"")+(m.since?t(' · od ')+esc(m.since):"")+(m.note?' · '+esc(m.note):"")+'</div></div>'
+    + t('<div class="acts"><button class="btn btn-ghost btn-sm" data-act="edit">Edytuj</button><button class="btn btn-ghost btn-sm" data-act="del">Usuń</button></div></div>');
 }
 function condRow(c){
   const cls = c.status === "aktywna" ? "s2" : c.status === "przebyta" ? "" : "s1";
   return '<div class="rec '+cls+'" data-id="'+esc(c.id)+'">'
-    + '<div class="main"><div class="name">'+esc(c.name)+' <span class="tag">'+esc(c.status)+'</span>'+srcTag(c)+'</div>'
+    + '<div class="main"><div class="name">'+esc(c.name)+' <span class="tag">'+esc(t(c.status))+'</span>'+srcTag(c)+'</div>'
     + '<div class="meta">'+(c.icd10?'<span class="code">ICD-10 '+esc(c.icd10)+'</span>':"")+(c.since?' · rozpoznanie '+esc(c.since):"")+(c.note?' · '+esc(c.note):"")+'</div></div>'
-    + '<div class="acts"><button class="btn btn-ghost btn-sm" data-act="edit">Edytuj</button><button class="btn btn-ghost btn-sm" data-act="del">Usuń</button></div></div>';
+    + t('<div class="acts"><button class="btn btn-ghost btn-sm" data-act="edit">Edytuj</button><button class="btn btn-ghost btn-sm" data-act="del">Usuń</button></div></div>');
 }
 function contactRow(k){
   return '<div class="rec '+(k.primary?"s1":"")+'" data-id="'+esc(k.id)+'">'
-    + '<div class="main"><div class="name">'+esc(k.name)+(k.primary?' <span class="tag tag-ok">kontakt pierwszy</span>':"")+'</div>'
+    + '<div class="main"><div class="name">'+esc(k.name)+(k.primary?' <span class="tag tag-ok">'+esc(t("kontakt pierwszy"))+'</span>':"")+'</div>'
     + '<div class="meta">'+esc(k.relation||"—")+' · <a href="tel:'+esc((k.phone||"").replace(/\s/g,""))+'">'+esc(k.phone)+'</a></div></div>'
-    + '<div class="acts"><button class="btn btn-ghost btn-sm" data-act="edit">Edytuj</button><button class="btn btn-ghost btn-sm" data-act="del">Usuń</button></div></div>';
+    + t('<div class="acts"><button class="btn btn-ghost btn-sm" data-act="edit">Edytuj</button><button class="btn btn-ghost btn-sm" data-act="del">Usuń</button></div></div>');
 }
 
 /* ---------------- start ---------------- */
@@ -1107,52 +1292,52 @@ async function renderStart(){
   + '<section class="hero">'
   +   '<div>'
   +     '<p class="eyebrow">Health Emergency Read Out</p>'
-  +     '<h1>Karta pacjenta, którą ratownik otwiera <em>jednym zbliżeniem</em>.</h1>'
-  +     '<p class="lead">MediTag to wodoodporna opaska NFC. HERO to platforma, w której pacjent i lekarz prowadzą jedną kartę: alergie, przyjmowane leki, choroby przewlekłe, grupę krwi i kontakty alarmowe. Odczyt ratunkowy działa bez logowania — także wtedy, gdy pacjent jest nieprzytomny.</p>'
-  +     '<div class="cta"><a class="btn btn-primary" href="#/karta">Załóż kartę</a><a class="btn" href="#/odczyt">Wykonaj odczyt ratunkowy</a></div>'
+  +     t('<h1>Karta pacjenta, którą ratownik otwiera <em>jednym zbliżeniem</em>.</h1>')
+  +     t('<p class="lead">MediTag to wodoodporna opaska NFC — a dla tych, którzy opaski nie założą, brelok do kluczy z tym samym układem. HERO to platforma, w której pacjent i lekarz prowadzą jedną kartę: alergie, przyjmowane leki, choroby przewlekłe, grupę krwi i kontakty alarmowe. Odczyt ratunkowy działa bez logowania — także wtedy, gdy pacjent jest nieprzytomny.</p>')
+  +     t('<div class="cta"><a class="btn btn-primary" href="#/karta">Załóż kartę</a><a class="btn" href="#/odczyt">Wykonaj odczyt ratunkowy</a></div>')
   +     '<div class="claim">'
-  +       '<div><b>Bez logowania</b><span class="tiny muted">odczyt ratunkowy nie wymaga konta</span></div>'
-  +       '<div><b>Bez aplikacji</b><span class="tiny muted">telefon z NFC otwiera stronę karty</span></div>'
-  +       '<div><b>Z audytem</b><span class="tiny muted">każdy odczyt trafia do historii karty</span></div>'
+  +       t('<div><b>Bez logowania</b><span class="tiny muted">odczyt ratunkowy nie wymaga konta</span></div>')
+  +       t('<div><b>Bez aplikacji</b><span class="tiny muted">telefon z NFC otwiera stronę karty</span></div>')
+  +       t('<div><b>Z audytem</b><span class="tiny muted">każdy odczyt trafia do historii karty</span></div>')
   +     '</div>'
   +   '</div>'
-  +   '<div class="band" aria-label="Podgląd karty na opasce">'
-  +     '<div class="band-top"><svg width="16" height="16" aria-hidden="true"><use href="#i-nfc"></use></svg>Karta ratunkowa</div>'
+  +   t('<div class="band" aria-label="Podgląd karty na opasce">')
+  +     t('<div class="band-top"><svg width="16" height="16" aria-hidden="true"><use href="#i-nfc"></use></svg>Karta ratunkowa</div>')
   +     '<div class="band-body">'
-  +       '<div class="band-row"><span>Grupa krwi</span><span>A RhD+</span></div>'
-  +       '<div class="band-row"><span>Alergie</span><span style="color:var(--crit)">Penicylina — anafilaksja</span></div>'
-  +       '<div class="band-row"><span>Leki</span><span>Rywaroksaban 20 mg <span class="tag tag-crit">antykoagulant</span></span></div>'
-  +       '<div class="band-row"><span>Choroby</span><span>Migotanie przedsionków (I48)</span></div>'
+  +       t('<div class="band-row"><span>Grupa krwi</span><span>A RhD+</span></div>')
+  +       t('<div class="band-row"><span>Alergie</span><span style="color:var(--crit)">Penicylina — anafilaksja</span></div>')
+  +       t('<div class="band-row"><span>Leki</span><span>Rywaroksaban 20 mg <span class="tag tag-crit">antykoagulant</span></span></div>')
+  +       t('<div class="band-row"><span>Choroby</span><span>Migotanie przedsionków (I48)</span></div>')
   +       '<div class="band-row"><span>Kontakt</span><span class="mono">+48 601 234 567</span></div>'
   +     '</div>'
-  +     '<div class="nfc"><span class="logo logo-meditag" role="img" aria-label="MediTag"></span><span style="display:flex;align-items:center;gap:.4rem"><svg width="13" height="13" aria-hidden="true"><use href="#i-nfc"></use></svg>Zbliż telefon do opaski</span></div>'
+  +     t('<div class="nfc"><span class="logo logo-meditag" role="img" aria-label="MediTag"></span><span style="display:flex;align-items:center;gap:.4rem"><svg width="13" height="13" aria-hidden="true"><use href="#i-nfc"></use></svg>Zbliż telefon do opaski</span></div>')
   +   '</div>'
   + '</section>'
 
   + '<section style="margin-top:2.6rem">'
   +   '<h2>Jak przebiega zdarzenie</h2>'
   +   '<div class="steps">'
-  +     '<div class="step"><span class="n">1</span><div><h3>Pacjent prowadzi kartę</h3><p class="small muted">Sam albo razem z lekarzem wpisuje alergie, leki i choroby. Wpis lekarza niesie jego nazwisko i numer PWZ.</p></div></div>'
-  +     '<div class="step"><span class="n">2</span><div><h3>Opaska nosi identyfikator</h3><p class="small muted">Kartę zapisujesz na opasce jednym zbliżeniem — zakładka „Opaska NFC”. W pamięci opaski zostaje sam adres karty, bez danych medycznych.</p></div></div>'
-  +     '<div class="step"><span class="n">3</span><div><h3>Zbliżenie otwiera kartę</h3><p class="small muted">Zakres zależy od tego, kto zbliżył telefon: ratownik dostaje zestaw krytyczny bez logowania, pacjent i lekarz — pełną kartę po PIN-ie. Każdy odczyt jest logowany.</p></div></div>'
+  +     t('<div class="step"><span class="n">1</span><div><h3>Pacjent prowadzi kartę</h3><p class="small muted">Sam albo razem z lekarzem wpisuje alergie, leki i choroby. Wpis lekarza niesie jego nazwisko i numer PWZ.</p></div></div>')
+  +     t('<div class="step"><span class="n">2</span><div><h3>Nośnik niesie identyfikator</h3><p class="small muted">Kartę zapisujesz na opasce albo na breloku do kluczy jednym zbliżeniem — zakładka „Nośniki”. W pamięci nośnika zostaje sam adres karty, bez danych medycznych.</p></div></div>')
+  +     t('<div class="step"><span class="n">3</span><div><h3>Zbliżenie otwiera kartę</h3><p class="small muted">Zakres zależy od tego, kto zbliżył telefon: bez konta widać sam zestaw ratunkowy, konto lekarza albo ratownika otwiera kartę w całości, pacjent wchodzi do niej PIN-em. Każdy odczyt jest logowany.</p></div></div>')
   +   '</div>'
   + '</section>'
 
-  + '<section style="margin-top:2.6rem"><h2>Wejdź jako</h2><p class="muted small" style="margin:.3rem 0 1rem">Trzy role, trzy różne zakresy dostępu do tej samej karty.</p>'
+  + t('<section style="margin-top:2.6rem"><h2>Wejdź jako</h2><p class="muted small" style="margin:.3rem 0 1rem">Trzy wejścia, trzy różne zakresy dostępu do tej samej karty.</p>')
   +   '<div class="roles">'
-  +     '<a class="role" href="#/karta"><h3>Pacjent</h3><p>Zakładasz kartę, ustawiasz PIN i decydujesz, co widzi ratownik. Możesz kartę usunąć w każdej chwili.</p><div class="go">Moja karta →</div></a>'
-  +     '<a class="role" href="#/lekarz"><h3>Lekarz</h3><p>Zakładasz konto z numerem PWZ, otwierasz kartę kodem pacjenta i uzupełniasz rozpoznania, leki i alergie. Każdy twój wpis niesie twoje nazwisko i numer.</p><div class="go">Panel lekarza →</div></a>'
-  +     '<a class="role crit" href="#/odczyt"><h3>Ratownik</h3><p>Sam identyfikator opaski, bez hasła. Zestaw krytyczny: alergie, antykoagulanty, choroby, kontakt alarmowy.</p><div class="go">Odczyt ratunkowy →</div></a>'
+  +     t('<a class="role" href="#/karta"><h3>Pacjent</h3><p>Zakładasz kartę, ustawiasz PIN i decydujesz, co widzi ratownik. Możesz kartę usunąć w każdej chwili.</p><div class="go">Moja karta →</div></a>')
+  +     t('<a class="role" href="#/lekarz"><h3>Lekarz i ratownik medyczny</h3><p>Konto zawodowe otwiera kartę w całości: nazwisko, kontakty alarmowe, pełną listę rozpoznań. Lekarz dopisuje rozpoznania, leki i alergie — każdy wpis niesie jego nazwisko i numer.</p><div class="go">Konto zawodowe →</div></a>')
+  +     t('<a class="role crit" href="#/odczyt"><h3>Bez konta</h3><p>Sam identyfikator z nośnika, bez hasła. Zestaw ratunkowy: grupa krwi, alergie, antykoagulanty, wszczepy, DNR — bez nazwiska i kontaktów.</p><div class="go">Odczyt ratunkowy →</div></a>')
   +   '</div>'
   + '</section>'
 
-  + '<section style="margin-top:2.6rem"><h2>Karty zapisane tutaj</h2>'
+  + t('<section style="margin-top:2.6rem"><h2>Karty zapisane tutaj</h2>')
   +   '<div class="panel" style="margin-top:.8rem"><div class="panel-b">'
   +   (cards.length
-      ? '<div class="scrollx"><table><thead><tr><th>Identyfikator</th><th>Pacjent</th><th>Ostatnia zmiana</th><th></th></tr></thead><tbody>'
-        + cards.map(c => '<tr><td class="tagid">'+esc(c.tagId)+(c.demo?' <span class="tag">przykład</span>':"")+'</td><td>'+esc(c.name||"—")+'</td><td>'+esc(fmtDT(c.updatedAt))+'</td><td style="text-align:right"><a class="btn btn-sm" href="#/t/'+encodeURIComponent(c.tagId)+'">Jak po zbliżeniu</a> <a class="btn btn-sm" href="#/odczyt?tag='+encodeURIComponent(c.tagId)+'">Odczytaj</a></td></tr>').join("")
+      ? t('<div class="scrollx"><table><thead><tr><th>Identyfikator</th><th>Pacjent</th><th>Ostatnia zmiana</th><th></th></tr></thead><tbody>')
+        + cards.map(c => '<tr><td class="tagid">'+esc(c.tagId)+(c.demo?t(' <span class="tag">przykład</span>'):"")+'</td><td>'+esc(c.name||"—")+'</td><td>'+esc(fmtDT(c.updatedAt))+'</td><td style="text-align:right"><a class="btn btn-sm" href="#/t/'+encodeURIComponent(c.tagId)+t('">Jak po zbliżeniu</a> <a class="btn btn-sm" href="#/odczyt?tag=')+encodeURIComponent(c.tagId)+'">Odczytaj</a></td></tr>').join("")
         + '</tbody></table></div>'
-      : '<div class="empty">Nie ma jeszcze żadnej karty. Zacznij od „Załóż kartę”.</div>')
+      : t('<div class="empty">Nie ma jeszcze żadnej karty. Zacznij od „Załóż kartę”.</div>'))
   +   '</div></div>'
   + '</section>';
 }
@@ -1160,49 +1345,54 @@ async function renderStart(){
 /* ---------------- emergency read-out ---------------- */
 function readoutHTML(card, entry){
   const p = card.person || {};
-  const a = age(p.birthDate);
+  /* Zestaw ratunkowy niesie sam wiek: daty urodzenia serwer nie oddaje bez konta. */
+  const a = card.rescue ? (p.ageYears == null ? null : p.ageYears) : age(p.birthDate);
   const flags = roFlags(card).map(f => '<span class="tag tag-'+f.waga+'">'+esc(f.tekst)+'</span>');
 
   return '<div class="readout">'
   + '<div class="ro-head">'
-  +   '<div><p class="eyebrow" style="color:var(--on-crit);opacity:.75">Odczyt ratunkowy · HERO</p><h2>'+esc(p.name || "Pacjent nieznany")+'</h2>'
-  +   '<p class="small" style="color:var(--on-crit);opacity:.9">'+esc(fmtD(p.birthDate))+(a!==null?' · '+a+' lat':"")+(p.weightKg?' · '+esc(p.weightKg)+' kg':"")+'</p></div>'
-  +   '<div class="ro-blood">'+esc((p.blood||"?") + (p.rh||""))+'<small>grupa krwi</small></div>'
+  +   '<div><p class="eyebrow" style="color:var(--on-crit);opacity:.75">'+esc(t("Odczyt ratunkowy · HERO"))+'</p>'
+  +   '<h2>'+esc(card.rescue ? t("Zestaw ratunkowy") : (p.name || t("Pacjent nieznany")))+'</h2>'
+  +   '<p class="small" style="color:var(--on-crit);opacity:.9">'
+  +     (card.rescue ? "" : esc(fmtD(p.birthDate)))+(a!==null?(card.rescue?"":" · ")+esc(tf("{0} lat", a)):"")
+  +     (p.weightKg?' · '+esc(p.weightKg)+' kg':"")+'</p></div>'
+  +   '<div class="ro-blood">'+esc((p.blood||"?") + (p.rh||""))+'<small>'+esc(t("grupa krwi"))+'</small></div>'
   + '</div>'
   + (flags.length ? '<div class="ro-flags">'+flags.join("")+'</div>' : "")
-  + '<div class="ro-sec"><h4>Alergie i nadwrażliwości</h4>'
-  +   (roAllergies(card).length ? roAllergies(card).map(allergyRowRO).join("") : '<p class="small muted">Nie zgłoszono żadnej alergii.</p>')
+  + '<div class="ro-sec"><h4>'+esc(t("Alergie i nadwrażliwości"))+'</h4>'
+  +   (roAllergies(card).length ? roAllergies(card).map(allergyRowRO).join("") : '<p class="small muted">'+esc(t("Nie zgłoszono żadnej alergii."))+'</p>')
   + '</div>'
-  + '<div class="ro-sec"><h4>Przyjmowane leki</h4>'
-  +   (roMeds(card).length ? roMeds(card).map(medRowRO).join("") : '<p class="small muted">Nie zgłoszono leków.</p>')
+  + '<div class="ro-sec"><h4>'+esc(t("Przyjmowane leki"))+'</h4>'
+  +   (roMeds(card).length ? roMeds(card).map(medRowRO).join("") : '<p class="small muted">'+esc(t("Nie zgłoszono leków."))+'</p>')
   + '</div>'
-  + '<div class="ro-sec"><h4>Choroby przewlekłe</h4>'
-  +   ((card.conditions||[]).length ? (card.conditions||[]).map(condRowRO).join("") : '<p class="small muted">Nie zgłoszono chorób przewlekłych.</p>')
+  + '<div class="ro-sec"><h4>'+esc(t("Choroby przewlekłe"))+'</h4>'
+  +   ((card.conditions||[]).length ? (card.conditions||[]).map(condRowRO).join("") : '<p class="small muted">'+esc(t("Nie zgłoszono chorób przewlekłych."))+'</p>')
   + '</div>'
-  + (p.devices || p.note ? '<div class="ro-sec"><h4>Uwagi istotne dla zespołu</h4><p class="small">'+esc([p.devices, p.note].filter(Boolean).join(" · "))+'</p></div>' : "")
-  + '<div class="ro-sec"><h4>Kontakty alarmowe</h4><div class="contacts">'
-  +   ((card.contacts||[]).length ? (card.contacts||[]).map(k => '<div class="contact"><div class="small" style="font-weight:600">'+esc(k.name)+(k.primary?' <span class="tag tag-ok">pierwszy</span>':"")+'</div><div class="tiny muted">'+esc(k.relation||"")+'</div><a href="tel:'+esc((k.phone||"").replace(/\s/g,""))+'">'+esc(k.phone)+'</a></div>').join("") : '<p class="small muted">Brak kontaktów alarmowych.</p>')
+  + (p.devices || p.note ? '<div class="ro-sec"><h4>'+esc(t("Uwagi istotne dla zespołu"))+'</h4><p class="small">'+esc([p.devices, p.note].filter(Boolean).join(" · "))+'</p></div>' : "")
+  + '<div class="ro-sec"><h4>'+esc(t("Kontakty alarmowe"))+'</h4><div class="contacts">'
+  +   (card.rescue
+      ? '<p class="small muted">'+esc(t("Nazwisko pacjenta i kontakty alarmowe otwiera konto lekarza albo ratownika. Bez konta zostaje to, co ratuje życie."))+'</p>'
+      : (card.contacts||[]).length ? (card.contacts||[]).map(k => '<div class="contact"><div class="small" style="font-weight:600">'+esc(k.name)+(k.primary?' <span class="tag tag-ok">'+esc(t("pierwszy"))+'</span>':"")+'</div><div class="tiny muted">'+esc(k.relation||"")+'</div><a href="tel:'+esc((k.phone||"").replace(/\s/g,""))+'">'+esc(k.phone)+'</a></div>').join("") : '<p class="small muted">'+esc(t("Brak kontaktów alarmowych."))+'</p>')
   + '</div></div>'
-  + '<div class="ro-foot"><span>Karta <span class="tagid">'+esc(card.tagId)+'</span> · aktualizacja '+esc(fmtDT(card.updatedAt))+' ('+esc(card.updatedBy||"pacjent")+')</span>'
-  +   '<span>Odczyt zapisany: '+esc(fmtDT(entry.at))+' · '+esc(entry.by)+'</span></div>'
+  + '<div class="ro-foot"><span>'+esc(t("Karta"))+' <span class="tagid">'+esc(card.tagId)+'</span> · '+esc(tf("aktualizacja {0} ({1})", fmtDT(card.updatedAt), t(card.updatedBy||"pacjent")))+'</span>'
+  +   '<span>'+esc(tf("Odczyt zapisany: {0} · {1}", fmtDT(entry.at), entry.by))+'</span></div>'
   + '</div>';
 }
 function allergyRowRO(a){
   const n = Number(a.severity)||1;
-  return '<div class="rec s'+n+'"><div class="main"><div class="name">'+esc(a.allergen)+' '+sevTag(n)+'<span class="tag">'+esc(a.kind)+'</span>'+sigTag(a)+'</div><div class="meta">'+esc(a.reaction||"reakcja nieopisana")+(a.note?' · '+esc(a.note):"")+'</div></div></div>';
+  return '<div class="rec s'+n+'"><div class="main"><div class="name">'+esc(a.allergen)+' '+sevTag(n)+'<span class="tag">'+esc(t(a.kind))+'</span>'+sigTag(a)+'</div><div class="meta">'+esc(a.reaction||t("reakcja nieopisana"))+(a.note?' · '+esc(a.note):"")+'</div></div></div>';
 }
 function medRowRO(m){
-  return '<div class="rec '+(m.anticoag?"s3":"")+'"><div class="main"><div class="name">'+esc(m.name)+(m.anticoag?' <span class="tag tag-crit">antykoagulant</span>':"")+sigTag(m)+'</div><div class="meta">'+esc([m.dose,m.freq,m.route].filter(Boolean).join(" · "))+(m.atc?' <span class="code">ATC '+esc(m.atc)+'</span>':"")+'</div></div></div>';
+  return '<div class="rec '+(m.anticoag?"s3":"")+'"><div class="main"><div class="name">'+esc(m.name)+(m.anticoag?' <span class="tag tag-crit">'+esc(t("antykoagulant"))+'</span>':"")+sigTag(m)+'</div><div class="meta">'+esc([m.dose,m.freq,m.route].filter(Boolean).join(" · "))+(m.atc?' <span class="code">ATC '+esc(m.atc)+'</span>':"")+'</div></div></div>';
 }
 function condRowRO(c){
-  return '<div class="rec '+(c.status==="aktywna"?"s2":"s1")+'"><div class="main"><div class="name">'+esc(c.name)+' <span class="tag">'+esc(c.status)+'</span>'+sigTag(c)+'</div><div class="meta">'+(c.icd10?'<span class="code">ICD-10 '+esc(c.icd10)+'</span>':"")+(c.note?' · '+esc(c.note):"")+'</div></div></div>';
+  return '<div class="rec '+(c.status==="aktywna"?"s2":"s1")+'"><div class="main"><div class="name">'+esc(c.name)+' <span class="tag">'+esc(t(c.status))+'</span>'+sigTag(c)+'</div><div class="meta">'+(c.icd10?'<span class="code">ICD-10 '+esc(c.icd10)+'</span>':"")+(c.note?' · '+esc(c.note):"")+'</div></div></div>';
 }
-/** Ratownik ze starą opaską w ręku musi wiedzieć, że trafił na odciętą, a nie na zepsuty serwis. */
+/** Ratownik ze zgubionym nośnikiem w ręku musi wiedzieć, że trafił na odcięty, a nie na zepsuty serwis. */
 function revokedHTML(tagId, revokedAt){
-  return '<div class="notice crit"><span><b>Opaska unieważniona</b>'
+  return '<div class="notice crit"><span><b>'+esc(t("Nośnik unieważniony"))+'</b>'
   + (revokedAt ? ' ' + esc(fmtDT(revokedAt)) : "")
-  + '. Pacjent zgłosił utratę tej opaski, więc pod jej adresem nie ma karty. Jeśli pacjent jest przytomny, '
-  + 'poproś o nową opaskę; jeśli nie — szukaj drugiej opaski albo dokumentów. Identyfikator: '
+  + esc(t(". Pacjent zgłosił jego utratę, więc pod tym identyfikatorem nie ma karty. Jeśli pacjent jest przytomny, poproś o inny nośnik; jeśli nie — szukaj drugiej opaski, breloka albo dokumentów. Identyfikator: "))
   + '<span class="tagid">' + esc(tagId) + '</span></span></div>';
 }
 
@@ -1210,32 +1400,50 @@ function wireHandover(card){
   const b = document.getElementById("copyHand");
   if(!b) return;
   b.addEventListener("click", async () => {
-    try { await navigator.clipboard.writeText(handoverText(card, age((card.person || {}).birthDate))); toast("Podsumowanie skopiowane"); }
-    catch(err){ toast("Przeglądarka zablokowała schowek"); }
+    /* Zestaw ratunkowy nie niesie daty urodzenia — sam wiek policzony na serwerze. */
+    const p = card.person || {};
+    const lat = card.rescue ? (p.ageYears == null ? null : p.ageYears) : age(p.birthDate);
+    try { await navigator.clipboard.writeText(handoverText(card, lat)); toast(t("Podsumowanie skopiowane")); }
+    catch(err){ toast(t("Przeglądarka zablokowała schowek")); }
   });
 }
 
-async function renderScan(params){
+/* `wynik` wraca tu przy zmianie języka: karta i wpis są już pobrane, więc przerysowanie nie
+   dokłada drugiego odczytu do historii. */
+async function renderScan(params, wynik){
   const pre = params.get("tag") || "";
   view.innerHTML = '<div class="stack" style="max-width:760px;margin-inline:auto">'
-  + '<div><p class="eyebrow">Rola: ratownik</p><h1 style="font-size:2rem">Odczyt ratunkowy</h1>'
-  + '<p class="muted" style="margin-top:.5rem">W realnym urządzeniu ten ekran otwiera się po zbliżeniu telefonu do opaski. Tutaj wpisz identyfikator karty ręcznie.</p></div>'
+  + '<div><p class="eyebrow">' + (DOCTOR ? t('Konto zawodowe: ') + esc(t(kontoRola(DOCTOR))) : t('Bez konta')) + '</p><h1 style="font-size:2rem">Odczyt ratunkowy</h1>'
+  + t('<p class="muted" style="margin-top:.5rem">W realnym urządzeniu ten ekran otwiera się po zbliżeniu telefonu do opaski albo breloka. Tutaj wpisz identyfikator ręcznie. ')
+  +   (DOCTOR ? t('Twoje konto otwiera kartę w całości.') : t('Bez konta zobaczysz sam zestaw ratunkowy.')) + '</p></div>'
   + '<div class="panel"><div class="panel-b"><form id="scanForm" class="row">'
-  +   '<label class="f" style="flex:2 1 220px">Identyfikator opaski<input class="mono" name="tag" placeholder="identyfikator z opaski" value="'+esc(pre)+'" required></label>'
-  +   '<label class="f" style="flex:1 1 160px">Kto odczytuje<input name="by" placeholder="ZRM P-12 / SOR"></label>'
-  +   '<button class="btn btn-crit" type="submit">Odczytaj kartę</button>'
-  +   (nfcReady() ? '<button class="btn" type="button" id="scanNfc">Odczytaj z opaski</button>' : "")
-  + '</form><p class="tiny muted" style="margin-top:.6rem">Odczyt nie wymaga PIN-u i zostaje zapisany w historii karty wraz z podanym opisem czytnika.</p></div></div>'
+  +   t('<label class="f" style="flex:2 1 220px">Identyfikator z nośnika<input class="mono" name="tag" placeholder="z opaski, breloka albo karty" value="')+esc(pre)+'" required></label>'
+  +   (DOCTOR ? '' : '<label class="f" style="flex:1 1 160px">Kto odczytuje<input name="by" placeholder="ZRM P-12 / SOR"></label>')
+  +   t('<button class="btn btn-crit" type="submit">Odczytaj kartę</button>')
+  +   (nfcReady() ? t('<button class="btn" type="button" id="scanNfc">Odczytaj z nośnika</button>') : "")
+  + t('</form><p class="tiny muted" style="margin-top:.6rem">Odczyt nie wymaga PIN-u i zostaje zapisany w historii karty — ')
+  +   (DOCTOR ? t('pod nazwiskiem i numerem z twojego konta.') : t('wraz z podanym opisem czytnika.')) + '</p></div></div>'
   + '<div id="scanOut"></div></div>';
 
   const out = document.getElementById("scanOut");
   const form = document.getElementById("scanForm");
   const nfcBtn = document.getElementById("scanNfc");
+  const pokaz = (card, entry) => {
+    out.innerHTML = (card.rescue
+        ? t('<div class="notice"><span>To zestaw ratunkowy: bez nazwiska pacjenta i bez kontaktów alarmowych. Kartę w całości otwiera konto lekarza albo ratownika medycznego.</span></div>')
+        : '')
+      + readoutHTML(card.rescue ? card : critical(card), entry)
+      + t('<div class="row" style="margin-top:.8rem"><button class="btn btn-sm" id="copyHand">Skopiuj podsumowanie do przekazania</button>')
+      + (card.rescue ? t('<a class="btn btn-sm btn-primary" href="#/lekarz">Otwórz kartę kontem zawodowym</a>') : '')
+      + '</div>';
+    wireHandover(card);
+    REPAINT = () => renderScan(params, {tag: form.tag.value, card, entry});
+  };
   if(nfcBtn) nfcBtn.addEventListener("click", async () => {
-    out.innerHTML = '<div class="notice"><span>Przyłóż opaskę do telefonu…</span></div>';
+    out.innerHTML = t('<div class="notice"><span>Przyłóż nośnik do telefonu…</span></div>');
     const r = await nfcScan(tag => {
       nfcStop();
-      if(!tag){ out.innerHTML = '<div class="notice warn"><span>W tej opasce nie ma adresu karty HERO.</span></div>'; return; }
+      if(!tag){ out.innerHTML = t('<div class="notice warn"><span>Nie ma tam adresu karty HERO.</span></div>'); return; }
       location.hash = "#/t/" + encodeURIComponent(tag);
     });
     if(!r.ok) out.innerHTML = '<div class="notice crit"><span>'+esc(r.error)+'</span></div>';
@@ -1243,24 +1451,27 @@ async function renderScan(params){
   form.addEventListener("submit", async e => {
     e.preventDefault();
     const tag = form.tag.value.trim().toUpperCase();
-    const by = form.by.value.trim() || "czytnik nieopisany";
+    const by = form.by ? (form.by.value.trim() || "czytnik nieopisany") : kontoOpis(DOCTOR);
     const card = await store.get(tag);
-    if(!card){ out.innerHTML = '<div class="notice crit"><span>Nie znaleziono karty <b class="tagid">'+esc(tag)+'</b>. Sprawdź identyfikator albo załóż kartę w zakładce „Moja karta”.</span></div>'; return; }
+    if(!card){ out.innerHTML = t('<div class="notice crit"><span>Nie znaleziono karty <b class="tagid">')+esc(tag)+t('</b>. Sprawdź identyfikator albo załóż kartę w zakładce „Moja karta”.</span></div>'); return; }
     if(card.revoked){ out.innerHTML = revokedHTML(tag, card.revokedAt); return; }
-    const entry = await store.logRead(tag, by, "odczyt ratunkowy");
-    out.innerHTML = readoutHTML(critical(card), entry)
-      + '<div class="row" style="margin-top:.8rem"><button class="btn btn-sm" id="copyHand">Skopiuj podsumowanie do przekazania</button></div>';
-    wireHandover(card);
+    /* Kartę wydaną kontu serwer wpisał już do historii — drugi wpis byłby zdublowany. */
+    const entry = (API && DOCTOR)
+      ? ((card.reads || [])[0] || {at: nowISO(), by: kontoOpis(DOCTOR)})
+      : await store.logRead(tag, by, DOCTOR ? readCtx(DOCTOR) : "odczyt ratunkowy");
+    pokaz(card, entry);
     out.scrollIntoView({behavior:"smooth", block:"start"});
   });
-  if(pre) form.dispatchEvent(new Event("submit"));
+  if(wynik) { form.tag.value = wynik.tag; pokaz(wynik.card, wynik.entry); }
+  else if(pre) form.dispatchEvent(new Event("submit"));
 }
 
 /* ---------------- card editor ---------------- */
 let CARD = null, ROLE = "pacjent", TAB = "podstawowe", EDIT = {};
-const TABS = [["podstawowe","Dane podstawowe"],["alergie","Alergie"],["leki","Leki"],["choroby","Choroby"],["kontakty","Kontakty"],["opaska","Opaska NFC"],["historia","Historia odczytów"]];
+const TABS = [["podstawowe","Dane podstawowe"],["alergie","Alergie"],["leki","Leki"],["choroby","Choroby"],["kontakty","Kontakty"],["nosniki","Nośniki"],["historia","Historia odczytów"]];
 const ROUTES = ["doustnie","podskórnie","dożylnie","domięśniowo","wziewnie","przezskórnie","inne"];
-function opt(list, cur){ return list.map(v => '<option value="'+esc(v)+'"'+(String(cur)===String(v)?" selected":"")+'>'+esc(v)+'</option>').join(""); }
+/* Wartość zostaje w karcie po polsku, bo to dane; przez słownik idzie sam napis w liście. */
+function opt(list, cur){ return list.map(v => '<option value="'+esc(v)+'"'+(String(cur)===String(v)?" selected":"")+'>'+esc(t(v))+'</option>').join(""); }
 
 function renderEditor(){
   nfcStop();
@@ -1268,17 +1479,17 @@ function renderEditor(){
   const isDoc = ROLE === "lekarz";
   view.innerHTML = '<div class="stack">'
   + '<div class="panel"><div class="panel-h">'
-  +   '<div><p class="eyebrow">'+(isDoc ? "Rola: lekarz — " + esc(DOCTOR ? DOCTOR.name + ", PWZ " + DOCTOR.pwz : "konto nieznane") : "Rola: pacjent")+'</p>'
-  +   '<h3>'+esc(p.name || "Karta bez nazwiska")+' <span class="tagid tiny muted">'+esc(CARD.tagId)+'</span>'
-  +   (CARD.revokedAt ? ' <span class="tag tag-crit">opaska unieważniona</span>' : "")+'</h3>'
+  +   '<div><p class="eyebrow">'+(isDoc ? t("Rola: lekarz — ") + esc(DOCTOR ? kontoOpis(DOCTOR) : "konto nieznane") : t("Rola: pacjent"))+'</p>'
+  +   '<h3>'+esc(p.name || t("Karta bez nazwiska"))+' <span class="tagid tiny muted">'+esc(CARD.tagId)+'</span>'
+  +   (CARD.revokedAt ? t(' <span class="tag tag-crit">karta odcięta</span>') : "")+'</h3>'
   +   '<p class="tiny muted">Ostatnia zmiana: '+esc(fmtDT(CARD.updatedAt))+' · '+esc(CARD.updatedBy||"pacjent")+'</p></div>'
   +   '<div class="row" style="margin-left:auto">'
-  +     '<a class="btn btn-sm" href="#/odczyt?tag='+encodeURIComponent(CARD.tagId)+'">Podgląd odczytu</a>'
-  +     (isDoc ? "" : '<button class="btn btn-sm" id="delCard">Usuń kartę</button>')
+  +     '<a class="btn btn-sm" href="#/odczyt?tag='+encodeURIComponent(CARD.tagId)+t('">Podgląd odczytu</a>')
+  +     (isDoc ? "" : t('<button class="btn btn-sm" id="delCard">Usuń kartę</button>'))
   +     '<button class="btn btn-sm" id="logout">Zamknij</button>'
   +   '</div>'
   + '</div>'
-  + '<div class="tabs" role="tablist">' + TABS.map(([k,l]) => '<button role="tab" data-tab="'+k+'" aria-selected="'+(TAB===k)+'">'+esc(l)+'</button>').join("") + '</div>'
+  + '<div class="tabs" role="tablist">' + TABS.map(([k,l]) => '<button role="tab" data-tab="'+k+'" aria-selected="'+(TAB===k)+'">'+esc(t(l))+'</button>').join("") + '</div>'
   + '<div class="panel-b" id="tabBody"></div></div></div>';
 
   view.querySelectorAll("[data-tab]").forEach(b => b.addEventListener("click", () => { TAB = b.dataset.tab; EDIT = {}; renderEditor(); }));
@@ -1286,8 +1497,8 @@ function renderEditor(){
   if(lo) lo.addEventListener("click", () => { ses.clear(); CARD = null; location.hash = "#/"; });
   const dc = document.getElementById("delCard");
   if(dc) dc.addEventListener("click", async () => {
-    if(!confirm("Usunąć kartę " + CARD.tagId + " wraz z historią odczytów? Operacji nie da się cofnąć.")) return;
-    await store.remove(CARD.tagId); forgetOwner(CARD.tagId); ses.clear(); CARD = null; toast("Karta usunięta"); location.hash = "#/";
+    if(!confirm(t("Usunąć kartę ") + CARD.tagId + t(" wraz z historią odczytów? Operacji nie da się cofnąć."))) return;
+    await store.remove(CARD.tagId); forgetOwner(CARD.tagId); ses.clear(); CARD = null; toast(t("Karta usunięta")); location.hash = "#/";
   });
   renderTab();
 }
@@ -1308,30 +1519,30 @@ async function renderTab(){
   if(TAB === "podstawowe"){
     b.innerHTML = '<form id="fBasic" class="stack">'
     + '<div class="grid g2">'
-    +   '<label class="f">Imię i nazwisko<input name="name" value="'+esc(p.name)+'" placeholder="Jan Kowalski"></label>'
+    +   t('<label class="f">Imię i nazwisko<input name="name" value="')+esc(p.name)+'" placeholder="Jan Kowalski"></label>'
     +   '<label class="f">Data urodzenia<input type="date" name="birthDate" value="'+esc(p.birthDate)+'"></label>'
     + '</div>'
     + '<div class="grid g3">'
-    +   '<label class="f">Grupa krwi<select name="blood"><option value="">—</option>'+opt(["0","A","B","AB"], p.blood)+'</select></label>'
+    +   t('<label class="f">Grupa krwi<select name="blood"><option value="">—</option>')+opt(["0","A","B","AB"], p.blood)+'</select></label>'
     +   '<label class="f">RhD<select name="rh"><option value="">—</option>'+opt(["+","-"], p.rh)+'</select></label>'
-    +   '<label class="f">Masa ciała (kg)<input name="weightKg" inputmode="numeric" value="'+esc(p.weightKg)+'"></label>'
+    +   t('<label class="f">Masa ciała (kg)<input name="weightKg" inputmode="numeric" value="')+esc(p.weightKg)+'"></label>'
     +   '<label class="f">Wzrost (cm)<input name="heightCm" inputmode="numeric" value="'+esc(p.heightCm)+'"></label>'
     + '</div>'
-    + '<label class="f">Języki kontaktu<input name="langs" value="'+esc(p.langs)+'" placeholder="pl, en"></label>'
-    + '<label class="f">Wszczepy i urządzenia<textarea name="devices" placeholder="np. stymulator serca, pompa insulinowa, zastawka mechaniczna">'+esc(p.devices)+'</textarea></label>'
-    + '<label class="f">Uwagi dla zespołu ratunkowego<textarea name="note" placeholder="np. trudny dostęp dożylny, niepełnosprawność, opieka nad dzieckiem">'+esc(p.note)+'</textarea></label>'
-    + '<div class="row"><label class="check"><input type="checkbox" name="donor"'+(p.donor?" checked":"")+'> Zgoda na pobranie narządów</label>'
-    +   '<label class="check"><input type="checkbox" name="dnr"'+(p.dnr?" checked":"")+'> Zgłoszone oświadczenie DNR</label></div>'
-    + '<div class="row"><button class="btn btn-primary" type="submit">Zapisz dane podstawowe</button></div></form>'
+    + t('<label class="f">Języki kontaktu<input name="langs" value="')+esc(p.langs)+'" placeholder="pl, en"></label>'
+    + t('<label class="f">Wszczepy i urządzenia<textarea name="devices" placeholder="np. stymulator serca, pompa insulinowa, zastawka mechaniczna">')+esc(p.devices)+'</textarea></label>'
+    + t('<label class="f">Uwagi dla zespołu ratunkowego<textarea name="note" placeholder="np. trudny dostęp dożylny, niepełnosprawność, opieka nad dzieckiem">')+esc(p.note)+'</textarea></label>'
+    + '<div class="row"><label class="check"><input type="checkbox" name="donor"'+(p.donor?" checked":"")+t('> Zgoda na pobranie narządów</label>')
+    +   '<label class="check"><input type="checkbox" name="dnr"'+(p.dnr?" checked":"")+t('> Zgłoszone oświadczenie DNR</label></div>')
+    + t('<div class="row"><button class="btn btn-primary" type="submit">Zapisz dane podstawowe</button></div></form>')
     /* PIN chroni edycję karty, więc zmienia go pacjent, nie lekarz z dostępem do tej samej karty. */
     + (ROLE === "pacjent"
-      ? '<details style="margin-top:1.2rem"><summary class="small muted" style="cursor:pointer">Zmiana PIN-u</summary>'
-        + '<p class="small muted" style="margin:.6rem 0">PIN otwiera kartę do edycji — jeśli ktoś go poznał, zmień go tutaj. Karta, historia odczytów i opaska zostają bez zmian, bo PIN-u nie ma w opasce.</p>'
+      ? t('<details style="margin-top:1.2rem"><summary class="small muted" style="cursor:pointer">Zmiana PIN-u</summary>')
+        + t('<p class="small muted" style="margin:.6rem 0">PIN otwiera kartę do edycji — jeśli ktoś go poznał, zmień go tutaj. Karta, historia odczytów i nośniki zostają bez zmian, bo PIN-u nie ma w żadnym z nich.</p>')
         + '<form id="fPin" class="stack" style="max-width:340px">'
-        +   '<label class="f">Obecny PIN<input type="password" name="stary" inputmode="numeric" required></label>'
-        +   '<label class="f">Nowy PIN<input type="password" name="nowy" inputmode="numeric" minlength="4" maxlength="6" required placeholder="4–6 cyfr"></label>'
-        +   '<label class="f">Powtórz nowy PIN<input type="password" name="nowy2" inputmode="numeric" required></label>'
-        +   '<button class="btn btn-primary btn-sm" type="submit">Zmień PIN</button>'
+        +   t('<label class="f">Obecny PIN<input type="password" name="stary" inputmode="numeric" required></label>')
+        +   t('<label class="f">Nowy PIN<input type="password" name="nowy" inputmode="numeric" minlength="4" maxlength="6" required placeholder="4–6 cyfr"></label>')
+        +   t('<label class="f">Powtórz nowy PIN<input type="password" name="nowy2" inputmode="numeric" required></label>')
+        +   t('<button class="btn btn-primary btn-sm" type="submit">Zmień PIN</button>')
         +   '<p id="pinErr" class="tiny" style="color:var(--crit)"></p>'
         + '</form></details>'
       : "");
@@ -1347,99 +1558,142 @@ async function renderTab(){
     if(formPin) formPin.addEventListener("submit", async ev => {
       ev.preventDefault();
       const f = ev.target;
-      if(f.nowy.value !== f.nowy2.value){ formErr("pinErr", "Nowe PIN-y się różnią."); return; }
+      if(f.nowy.value !== f.nowy2.value){ formErr("pinErr", t("Nowe PIN-y się różnią.")); return; }
       const stary = await digest(CARD.tagId, f.stary.value);
-      if(PIN_DG && stary !== PIN_DG){ formErr("pinErr", "Obecny PIN się nie zgadza."); return; }
+      if(PIN_DG && stary !== PIN_DG){ formErr("pinErr", t("Obecny PIN się nie zgadza.")); return; }
       const nowy = await digest(CARD.tagId, f.nowy.value);
-      if(nowy === stary){ formErr("pinErr", "Nowy PIN jest taki sam jak stary."); return; }
+      if(nowy === stary){ formErr("pinErr", t("Nowy PIN jest taki sam jak stary.")); return; }
       const r = await store.changePin(CARD.tagId, nowy);
       if(!r.ok){ formErr("pinErr", r.error); return; }
       PIN_DG = nowy;
       ses.set({tagId:CARD.tagId, role:ROLE, dg:PIN_DG});
-      toast("PIN zmieniony");
+      toast(t("PIN zmieniony"));
       renderEditor();
     });
     return;
   }
 
-  if(TAB === "opaska"){
+  if(TAB === "nosniki"){
     const base = appBase(location);
-    const url = tagUrl(CARD.tagId, base);
     const martwa = !!CARD.revokedAt;
     const mozeZapisac = nfcReady() && !martwa;
-    b.innerHTML = '<div class="stack">'
+    /* Karta zawsze ma co najmniej jeden nośnik: swój adres własny. Gdyby lista nie doszła (stara
+       baza, tryb bez serwera przed migracją), pokazujemy właśnie ten adres. */
+    const lista = (CARD.carriers && CARD.carriers.length)
+      ? CARD.carriers
+      : [{tagId: CARD.tagId, kind: "opaska", label: "", revokedAt: CARD.revokedAt || null}];
+
+    const panelNos = n => {
+      const url = tagUrl(n.tagId, base);
+      const zgasl = !!n.revokedAt || martwa;
+      return '<div class="panel" data-nos="'+esc(n.tagId)+'">'
+      + '<div class="panel-h"><div><p class="eyebrow">'+esc(kindName(n.kind))+'</p>'
+      +   '<h3>'+esc(n.label || kindName(n.kind))+' <span class="mono tiny muted">'+esc(n.tagId)+'</span></h3></div>'
+      + (n.revokedAt ? t('<span class="tag tag-crit" style="margin-left:auto">unieważniony ')+esc(fmtDT(n.revokedAt))+'</span>' : "")
+      + '</div><div class="panel-b">'
+      + (zgasl
+        ? t('<p class="small muted">Pod tym identyfikatorem nikt już nie odczyta karty. Nośnik zostaje na liście jako nagrobek: ratownik, który go zbliży, ma zobaczyć „unieważniony", a nie „nie ma takiej karty".</p>')
+        : '<div class="qrbox">'
+          + (base ? qrSvg(url, t("Kod QR z adresem karty ") + CARD.tagId) : "")
+          + t('<div><label class="f">Adres zapisywany w nośniku<input class="mono" data-url readonly value="')+esc(url)+'"></label>'
+          +   t('<p class="tiny muted" style="margin-top:.5rem">Kod QR niesie ten sam adres. Działa tam, gdzie NFC nie: na telefonie bez czytnika, na iOS i po wydrukowaniu.</p></div>')
+          + '</div>'
+          + '<div class="row" style="margin-top:.8rem">'
+          +   '<button class="btn btn-primary btn-sm" data-act="zapisz"'+(mozeZapisac?"":" disabled")+t('>Zapisz na tym nośniku</button>')
+          +   '<button class="btn btn-sm" data-act="sprawdz"'+(nfcReady()?"":" disabled")+t('>Sprawdź, co jest w nośniku</button>')
+          +   '<button class="btn btn-sm" data-act="kopiuj">Skopiuj adres</button>'
+          +   (ROLE === "pacjent" ? t('<button class="btn btn-crit btn-sm" data-act="zgas">Zgubiony — unieważnij</button>') : "")
+          + '</div>')
+      + '</div></div>';
+    };
+
+    b.innerHTML = '<div class="stack" id="nosniki">'
     + (martwa
-        ? '<div class="notice crit"><span>Ta opaska jest unieważniona od '+esc(fmtDT(CARD.revokedAt))+'. Pod jej adresem nikt nie dostanie karty — ani ratownik, ani ty. Karta ma się znów odczytywać? Przenieś ją na nową opaskę.</span></div>'
+        ? t('<div class="notice crit"><span>Ta karta jest odcięta od ')+esc(fmtDT(CARD.revokedAt))+t('. Żaden nośnik nie oddaje jej już do odczytu — ani ratownikowi, ani tobie. Treść karty zostaje i otwiera ją PIN.</span></div>')
         : "")
-    + '<p class="small muted">W opasce zostaje sam adres tej karty, bez danych medycznych. Kto zbliży do niej telefon, otworzy ten adres: pacjent i lekarz trafią na pytanie o PIN, każdy inny na odczyt ratunkowy.</p>'
-    + '<div class="qrbox">'
-    +   (base ? qrSvg(url, "Kod QR z adresem karty " + CARD.tagId) : "")
-    +   '<div>'
-    +     '<label class="f">Adres zapisywany w opasce<input class="mono" id="nfcUrl" readonly value="'+esc(url)+'"></label>'
-    +     '<p class="tiny muted" style="margin-top:.5rem">Kod QR niesie ten sam adres. Działa tam, gdzie NFC nie: na telefonie bez czytnika, na iOS i po wydrukowaniu. Aparat telefonu wystarczy — kod prowadzi na ten sam ekran co zbliżenie opaski.</p>'
-    +   '</div>'
-    + '</div>'
-    + '<div class="row">'
-    +   '<button class="btn btn-primary" id="nfcWrite"'+(mozeZapisac?"":" disabled")+'>Zapisz kartę na opasce</button>'
-    +   '<button class="btn" id="nfcCheck"'+(nfcReady()?"":" disabled")+'>Sprawdź, co jest na opasce</button>'
-    +   '<button class="btn btn-sm" id="nfcCopy">Skopiuj adres</button>'
-    +   '<button class="btn btn-sm" id="doWydruku">Wydrukuj kartę do portfela</button>'
-    + '</div>'
-    + '<div id="nfcOut"></div>'
-    + (nfcReady() ? '' : '<div class="notice warn"><span>Ta przeglądarka nie udostępnia Web NFC — zapis działa dziś w Chrome na Androidzie, na stronie otwartej przez HTTPS. Na innym sprzęcie zapisz powyższy adres w opasce dowolną aplikacją do NFC, jako rekord typu URL.</span></div>')
-    + (base ? '' : '<div class="notice warn"><span>Strona jest otwarta z pliku, więc adres nie ma nazwy serwera i telefon ratownika go nie otworzy. Uruchom aplikację przez <span class="mono">npm start</span> albo wystaw ją pod adresem HTTPS.</span></div>')
-    + (API ? '' : '<div class="notice"><span>Karta leży w pamięci tej przeglądarki, nie na serwerze. Opaska zaprowadzi pod ten adres każdy telefon, ale kartę znajdzie pod nim tylko ta przeglądarka. Opaska, która ma zadziałać u ratownika, wymaga serwera HERO.</span></div>')
-    + '<details><summary class="small muted" style="cursor:pointer">Opaska zapisana na stałe</summary>'
-    +   '<p class="small muted" style="margin:.6rem 0">Opaskę można zablokować przed nadpisaniem. Operacji nie da się cofnąć: zablokowanej opaski nie przypiszesz już do innej karty.</p>'
-    +   '<button class="btn btn-sm" id="nfcLock"'+(nfcReady()?"":" disabled")+'>Zabezpiecz opaskę przed zapisem</button>'
-    + '</details>'
-    /* Unieważnienie i przeniesienie zmieniają los całej karty, więc zostają przy pacjencie — tak samo
-       jak usunięcie karty, którego lekarz też nie ma. */
-    + (ROLE === "pacjent"
-      ? '<details'+(martwa?" open":"")+'><summary class="small muted" style="cursor:pointer">Zgubiona opaska</summary>'
-        + '<p class="small muted" style="margin:.6rem 0">Sam identyfikator z opaski otwiera odczyt ratunkowy, więc zgubiona opaska zostaje kluczem do zestawu krytycznego. Unieważnienie odcina ten adres na zawsze: karta zostaje, ale pod starym identyfikatorem nikt jej nie odczyta. Przeniesienie robi to samo i od razu daje karcie nową opaskę — historia odczytów zostaje przy starej.</p>'
-        + (martwa ? "" : '<div class="row" style="margin-bottom:1rem"><button class="btn btn-crit btn-sm" id="revoke">Unieważnij tę opaskę</button></div>')
-        + '<form id="fMove" class="stack" style="max-width:340px">'
-        +   '<label class="f">PIN karty<input type="password" name="pin" inputmode="numeric" required placeholder="ten sam PIN"></label>'
-        +   '<button class="btn btn-primary btn-sm" type="submit">Przenieś kartę na nową opaskę</button>'
-        +   '<p class="tiny muted">Nowy identyfikator wymaga skrótu PIN-u przeliczonego dla niego, dlatego pytamy o PIN jeszcze raz. Sam PIN się nie zmienia.</p>'
-        +   '<p id="moveErr" class="tiny" style="color:var(--crit)"></p>'
+    + t('<p class="small muted">Nośnik niesie sam adres tej karty, bez danych medycznych. Kto go zbliży, otworzy ten adres: bez konta zobaczy zestaw ratunkowy, konto lekarza albo ratownika otworzy kartę w całości, a ty wejdziesz do niej PIN-em. Jedną kartę można nosić na kilku rzeczach naraz — opaska na ręku, brelok przy kluczach, karta w portfelu.</p>')
+    + lista.map(panelNos).join("")
+    + (ROLE === "pacjent" && !martwa
+      ? t('<div class="panel"><div class="panel-h"><h3>Dodaj nośnik</h3></div><div class="panel-b">')
+        + '<form id="fNos" class="row">'
+        +   '<label class="f" style="flex:1 1 180px">Rodzaj<select name="kind">'+KIND.map(([k,l]) => '<option value="'+k+'">'+esc(l)+'</option>').join("")+'</select></label>'
+        +   t('<label class="f" style="flex:2 1 220px">Opis dla ciebie<input name="label" maxlength="60" placeholder="brelok do kluczy"></label>')
+        +   t('<button class="btn btn-primary" type="submit">Dodaj nośnik</button>')
         + '</form>'
+        + '<p id="nosErr" class="tiny" style="color:var(--crit)"></p>'
+        + t('<p class="tiny muted" style="margin-top:.6rem">Nowy nośnik dostaje własny identyfikator i prowadzi do tej samej karty. PIN zostaje ten sam, bo wiąże się z kartą, nie z nośnikiem. Zgubiony nośnik unieważnia się osobno — pozostałe działają dalej.</p>')
+        + '</div></div>'
+      : "")
+    + '<div id="nfcOut"></div>'
+    + (nfcReady() ? '' : t('<div class="notice warn"><span>Ta przeglądarka nie udostępnia Web NFC — zapis działa dziś w Chrome na Androidzie, na stronie otwartej przez HTTPS. Na innym sprzęcie zapisz adres nośnika dowolną aplikacją do NFC, jako rekord typu URL.</span></div>'))
+    + (base ? '' : t('<div class="notice warn"><span>Strona jest otwarta z pliku, więc adres nie ma nazwy serwera i telefon ratownika go nie otworzy. Uruchom aplikację przez <span class="mono">npm start</span> albo wystaw ją pod adresem HTTPS.</span></div>'))
+    + (API ? '' : t('<div class="notice"><span>Karta leży w pamięci tej przeglądarki, nie na serwerze. Nośnik zaprowadzi pod ten adres każdy telefon, ale kartę znajdzie pod nim tylko ta przeglądarka. Nośnik, który ma zadziałać u ratownika, wymaga serwera HERO.</span></div>'))
+    + t('<div class="row"><button class="btn btn-sm" id="doWydruku">Wydrukuj kartę do portfela</button></div>')
+    + t('<details><summary class="small muted" style="cursor:pointer">Nośnik zapisany na stałe</summary>')
+    +   t('<p class="small muted" style="margin:.6rem 0">Opaskę albo brelok można zablokować przed nadpisaniem. Operacji nie da się cofnąć: zablokowanego nośnika nie przypiszesz już do innej karty.</p>')
+    +   '<button class="btn btn-sm" id="nfcLock"'+(nfcReady()?"":" disabled")+t('>Zabezpiecz nośnik przed zapisem</button>')
+    + '</details>'
+    /* Odcięcie całej karty zmienia jej los, więc zostaje przy pacjencie — tak samo jak usunięcie
+       karty, którego lekarz też nie ma. Zgubiony pojedynczy nośnik gaśnie przyciskiem przy nim. */
+    + (ROLE === "pacjent" && !martwa
+      ? t('<details><summary class="small muted" style="cursor:pointer">Odetnij całą kartę</summary>')
+        + t('<p class="small muted" style="margin:.6rem 0">Zgubiłeś jeden nośnik? Unieważnij właśnie jego — reszta działa dalej. Odcięcie całej karty gasi wszystkie nośniki naraz: pod żadnym identyfikatorem nikt jej nie odczyta, a operacji nie da się cofnąć. Treść karty i historia odczytów zostają, otwiera je PIN.</p>')
+        + t('<button class="btn btn-crit btn-sm" id="revoke">Odetnij całą kartę</button>')
         + '</details>'
       : "")
     + '</div>';
 
     const out = document.getElementById("nfcOut");
     const info = (cls, txt) => { out.innerHTML = '<div class="notice '+cls+'"><span>'+esc(txt)+'</span></div>'; };
-    document.getElementById("nfcCopy").addEventListener("click", async () => {
-      try { await navigator.clipboard.writeText(url); toast("Adres skopiowany"); }
-      catch(e){ document.getElementById("nfcUrl").select(); toast("Skopiuj zaznaczony adres"); }
-    });
-    if(mozeZapisac){
-      document.getElementById("nfcWrite").addEventListener("click", async () => {
-        info("", "Przyłóż opaskę do telefonu i przytrzymaj chwilę…");
+
+    document.getElementById("nosniki").addEventListener("click", async e => {
+      const btn = e.target.closest("[data-act]");
+      if(!btn) return;
+      const panel = btn.closest("[data-nos]");
+      const tag = panel.dataset.nos;
+      const pole = panel.querySelector("[data-url]");
+      const url = pole ? pole.value : "";
+      const rodzaj = (lista.find(n => n.tagId === tag) || {}).kind;
+      if(btn.dataset.act === "kopiuj"){
+        try { await navigator.clipboard.writeText(url); toast(t("Adres skopiowany")); }
+        catch(err){ pole.select(); toast("Skopiuj zaznaczony adres"); }
+        return;
+      }
+      if(btn.dataset.act === "zapisz"){
+        info("", prosbaOZblizenie(rodzaj));
         const r = await nfcWrite(url);
         if(!r.ok) return info("crit", r.error);
-        info("ok", "Opaska zapisana. Od teraz zbliżenie telefonu otwiera kartę " + CARD.tagId + ".");
-        toast("Opaska zapisana");
-      });
-    }
-    if(nfcReady()){
-      document.getElementById("nfcCheck").addEventListener("click", async () => {
-        info("", "Przyłóż opaskę do telefonu…");
+        info("ok", t("Zapisane. Od teraz zbliżenie otwiera kartę ") + CARD.tagId + ".");
+        toast(t("Nośnik zapisany"));
+        return;
+      }
+      if(btn.dataset.act === "sprawdz"){
+        info("", t("Przyłóż nośnik do telefonu…"));
         const r = await nfcScan(znaleziony => {
           nfcStop();
-          if(!znaleziony) return info("warn", "W opasce nie ma adresu karty HERO. Zapis ją przypisze.");
-          if(znaleziony === CARD.tagId) return info("ok", "W opasce jest ta karta: " + znaleziony + ".");
-          info("warn", "W opasce jest inna karta: " + znaleziony + ". Zapis nadpisze ten adres.");
+          if(!znaleziony) return info("warn", t("Nie ma tam adresu karty HERO. Zapis go przypisze."));
+          if(znaleziony === tag) return info("ok", t("To ten nośnik: ") + znaleziony + ".");
+          info("warn", t("Tam jest inny adres: ") + znaleziony + ". Zapis go nadpisze.");
         });
         if(!r.ok) info("crit", r.error);
-      });
+        return;
+      }
+      if(btn.dataset.act === "zgas"){
+        if(!confirm(t("Unieważnić nośnik ") + tag + t("? Pod tym identyfikatorem nikt już nie odczyta karty, a operacji nie da się cofnąć."))) return;
+        const r = await store.revokeCarrier(CARD.tagId, tag);
+        if(!r.ok){ info("crit", r.error); return; }
+        CARD.carriers = r.carriers;
+        toast(t("Nośnik unieważniony"));
+        renderEditor();
+      }
+    });
+
+    if(nfcReady()){
       document.getElementById("nfcLock").addEventListener("click", async () => {
-        if(!confirm("Zabezpieczyć opaskę przed zapisem? Adresu na niej nie da się już potem zmienić.")) return;
-        info("", "Przyłóż opaskę do telefonu…");
+        if(!confirm(t("Zabezpieczyć nośnik przed zapisem? Adresu na nim nie da się już potem zmienić."))) return;
+        info("", t("Przyłóż nośnik do telefonu…"));
         const r = await nfcLock();
-        info(r.ok ? "ok" : "crit", r.ok ? "Opaska zabezpieczona — zapisanego adresu nie da się już zmienić." : r.error);
+        info(r.ok ? "ok" : "crit", r.ok ? t("Nośnik zabezpieczony — zapisanego adresu nie da się już zmienić.") : r.error);
       });
     }
 
@@ -1447,38 +1701,29 @@ async function renderTab(){
       renderPrint(CARD, () => renderEditor());
     });
 
-    const przyciskRevoke = document.getElementById("revoke");
-    if(przyciskRevoke) przyciskRevoke.addEventListener("click", async () => {
-      if(!confirm("Unieważnić opaskę " + CARD.tagId + "? Pod tym adresem nikt już nie odczyta karty, a operacji nie da się cofnąć.")) return;
-      const r = await store.revoke(CARD.tagId);
-      if(!r.ok){ info("crit", r.error); return; }
-      CARD.revokedAt = r.revokedAt;
-      toast("Opaska unieważniona");
+    const formNos = document.getElementById("fNos");
+    if(formNos) formNos.addEventListener("submit", async ev => {
+      ev.preventDefault();
+      const f = ev.target;
+      const r = await store.addCarrier(CARD.tagId, {tagId: genTag(), kind: f.kind.value, label: f.label.value.trim()});
+      if(!r.ok){ formErr("nosErr", r.error); return; }
+      CARD.carriers = r.carriers;
+      toast(tf("{0} — nośnik dodany do karty", kindName(f.kind.value)));
       renderEditor();
     });
 
-    const formMove = document.getElementById("fMove");
-    if(formMove) formMove.addEventListener("submit", async ev => {
-      ev.preventDefault();
-      const pin = ev.target.pin.value;
-      const stary = CARD.tagId;
-      /* Skrót liczymy z PIN-u na miejscu: bez serwera nikt tego nie sprawdzi, a karty nie wolno
-         zostawić w połowie drogi. */
-      if(PIN_DG && await digest(stary, pin) !== PIN_DG){ formErr("moveErr", "Nieprawidłowy PIN."); return; }
-      const nowy = genTag();
-      const dgNowy = await digest(nowy, pin);
-      const r = await store.move(stary, nowy, dgNowy);
-      if(!r.ok){ formErr("moveErr", r.error); return; }
-      PIN_DG = dgNowy;
-      CARD = r.card;
-      ses.set({tagId:nowy, role:ROLE, dg:PIN_DG});
-      forgetOwner(stary);
-      markOwner(nowy, CARD.person && CARD.person.name);
-      toast("Karta przeniesiona na nową opaskę");
+    const przyciskRevoke = document.getElementById("revoke");
+    if(przyciskRevoke) przyciskRevoke.addEventListener("click", async () => {
+      if(!confirm(t("Odciąć całą kartę ") + CARD.tagId + t("? Żaden nośnik nie odda jej już do odczytu, a operacji nie da się cofnąć."))) return;
+      const r = await store.revoke(CARD.tagId);
+      if(!r.ok){ info("crit", r.error); return; }
+      CARD.revokedAt = r.revokedAt;
+      toast(t("Karta odcięta"));
       renderEditor();
     });
     return;
   }
+
 
   if(TAB === "historia"){
     if(PIN_DG){
@@ -1489,49 +1734,49 @@ async function renderTab(){
       if(fresh.ok) CARD.reads = fresh.card.reads || [];
     }
     const reads = CARD.reads || [];
-    b.innerHTML = '<div class="row" style="justify-content:space-between;margin-bottom:.8rem"><p class="small muted" style="flex:1 1 260px">Każde otwarcie karty w trybie ratunkowym zostawia ślad. Historia jest widoczna dla pacjenta i lekarza z dostępem.</p>'
-    + '<button class="btn btn-sm" id="reloadReads">Odśwież</button></div>'
+    b.innerHTML = t('<div class="row" style="justify-content:space-between;margin-bottom:.8rem"><p class="small muted" style="flex:1 1 260px">Każde otwarcie karty w trybie ratunkowym zostawia ślad. Historia jest widoczna dla pacjenta i lekarza z dostępem.</p>')
+    + t('<button class="btn btn-sm" id="reloadReads">Odśwież</button></div>')
     + (reads.length
-      ? '<div class="scrollx"><table><thead><tr><th>Kiedy</th><th>Kto</th><th>Kontekst</th></tr></thead><tbody>'
-        + reads.map(r => '<tr><td class="mono">'+esc(fmtDT(r.at))+'</td><td>'+esc(r.by)+'</td><td>'+esc(r.ctx)+'</td></tr>').join("")
+      ? t('<div class="scrollx"><table><thead><tr><th>Kiedy</th><th>Kto</th><th>Kontekst</th></tr></thead><tbody>')
+        + reads.map(r => '<tr><td class="mono">'+esc(fmtDT(r.at))+'</td><td>'+esc(r.by)+'</td><td>'+esc(t(r.ctx))+'</td></tr>').join("")
         + '</tbody></table></div>'
-      : '<div class="empty">Karta nie była jeszcze odczytywana.</div>');
+      : t('<div class="empty">Karta nie była jeszcze odczytywana.</div>'));
     document.getElementById("reloadReads").addEventListener("click", () => renderTab());
     return;
   }
 
   const cfg = {
-    alergie: { key:"allergies", row:allergyRow, title:"Dodaj alergię",
+    alergie: { key:"allergies", row:allergyRow, title:t("Dodaj alergię"),
       form: e => '<div class="grid g2">'
         + '<label class="f">Alergen<input name="allergen" required value="'+esc(e.allergen)+'" placeholder="np. penicylina, jad osy, orzechy"></label>'
         + '<label class="f">Rodzaj<select name="kind">'+opt(["lek","pokarm","inne"], e.kind||"lek")+'</select></label>'
-        + '<label class="f">Reakcja<input name="reaction" value="'+esc(e.reaction)+'" placeholder="np. obrzęk krtani, pokrzywka"></label>'
+        + '<label class="f">Reakcja<input name="reaction" value="'+esc(e.reaction)+t('" placeholder="np. obrzęk krtani, pokrzywka"></label>')
         + '<label class="f">Nasilenie<select name="severity">'+[1,2,3,4].map(n=>'<option value="'+n+'"'+(Number(e.severity||2)===n?" selected":"")+'>'+n+" — "+SEV[n]+'</option>').join("")+'</select></label>'
-        + '</div><label class="f">Uwagi<input name="note" value="'+esc(e.note)+'" placeholder="np. potwierdzone testami, nosi adrenalinę"></label>',
+        + '</div><label class="f">Uwagi<input name="note" value="'+esc(e.note)+t('" placeholder="np. potwierdzone testami, nosi adrenalinę"></label>'),
       read: f => ({allergen:f.allergen.value.trim(), kind:f.kind.value, reaction:f.reaction.value.trim(), severity:Number(f.severity.value), note:f.note.value.trim()}) },
-    leki: { key:"meds", row:medRow, title:"Dodaj lek",
+    leki: { key:"meds", row:medRow, title:t("Dodaj lek"),
       form: e => '<div class="grid g2">'
         + '<label class="f">Nazwa leku<input name="name" required value="'+esc(e.name)+'" placeholder="np. rywaroksaban"></label>'
-        + '<label class="f">Kod ATC<input class="mono" name="atc" value="'+esc(e.atc)+'" placeholder="B01AF01"></label>'
+        + t('<label class="f">Kod ATC<input class="mono" name="atc" value="')+esc(e.atc)+'" placeholder="B01AF01"></label>'
         + '<label class="f">Dawka<input name="dose" value="'+esc(e.dose)+'" placeholder="20 mg"></label>'
-        + '<label class="f">Częstość<input name="freq" value="'+esc(e.freq)+'" placeholder="1× dziennie, wieczorem"></label>'
+        + t('<label class="f">Częstość<input name="freq" value="')+esc(e.freq)+'" placeholder="1× dziennie, wieczorem"></label>'
         + '<label class="f">Droga podania<select name="route">'+opt(ROUTES, e.route||"doustnie")+'</select></label>'
-        + '<label class="f">Przyjmuje od<input name="since" value="'+esc(e.since)+'" placeholder="2021-06"></label>'
+        + t('<label class="f">Przyjmuje od<input name="since" value="')+esc(e.since)+'" placeholder="2021-06"></label>'
         + '</div><label class="f">Uwagi<input name="note" value="'+esc(e.note)+'" placeholder="np. wskazanie, uwagi o odstawieniu"></label>'
-        + '<label class="check" style="margin-top:.5rem"><input type="checkbox" name="anticoag"'+(e.anticoag?" checked":"")+'> Lek przeciwkrzepliwy lub przeciwpłytkowy (wyróżniany w odczycie ratunkowym)</label>',
+        + '<label class="check" style="margin-top:.5rem"><input type="checkbox" name="anticoag"'+(e.anticoag?" checked":"")+t('> Lek przeciwkrzepliwy lub przeciwpłytkowy (wyróżniany w odczycie ratunkowym)</label>'),
       read: f => ({name:f.name.value.trim(), atc:f.atc.value.trim().toUpperCase(), dose:f.dose.value.trim(), freq:f.freq.value.trim(), route:f.route.value, since:f.since.value.trim(), anticoag:f.anticoag.checked, note:f.note.value.trim()}) },
-    choroby: { key:"conditions", row:condRow, title:"Dodaj chorobę lub rozpoznanie",
+    choroby: { key:"conditions", row:condRow, title:t("Dodaj chorobę lub rozpoznanie"),
       form: e => '<div class="grid g2">'
-        + '<label class="f">Rozpoznanie<input name="name" required value="'+esc(e.name)+'" placeholder="np. migotanie przedsionków"></label>'
-        + '<label class="f">Kod ICD-10<input class="mono" name="icd10" value="'+esc(e.icd10)+'" placeholder="I48"></label>'
+        + '<label class="f">Rozpoznanie<input name="name" required value="'+esc(e.name)+t('" placeholder="np. migotanie przedsionków"></label>')
+        + t('<label class="f">Kod ICD-10<input class="mono" name="icd10" value="')+esc(e.icd10)+'" placeholder="I48"></label>'
         + '<label class="f">Od kiedy<input name="since" value="'+esc(e.since)+'" placeholder="2021"></label>'
         + '<label class="f">Status<select name="status">'+opt(["aktywna","kontrolowana","przebyta"], e.status||"aktywna")+'</select></label>'
         + '</div><label class="f">Uwagi<input name="note" value="'+esc(e.note)+'" placeholder="np. leczenie, wyniki kontrolne"></label>',
       read: f => ({name:f.name.value.trim(), icd10:f.icd10.value.trim().toUpperCase(), since:f.since.value.trim(), status:f.status.value, note:f.note.value.trim()}) },
-    kontakty: { key:"contacts", row:contactRow, title:"Dodaj kontakt alarmowy",
+    kontakty: { key:"contacts", row:contactRow, title:t("Dodaj kontakt alarmowy"),
       form: e => '<div class="grid g2">'
-        + '<label class="f">Imię i nazwisko<input name="name" required value="'+esc(e.name)+'" placeholder="np. Marek Wiśniewski"></label>'
-        + '<label class="f">Relacja<input name="relation" value="'+esc(e.relation)+'" placeholder="mąż, córka, lekarz prowadzący"></label>'
+        + t('<label class="f">Imię i nazwisko<input name="name" required value="')+esc(e.name)+t('" placeholder="np. Marek Wiśniewski"></label>')
+        + '<label class="f">Relacja<input name="relation" value="'+esc(e.relation)+t('" placeholder="mąż, córka, lekarz prowadzący"></label>')
         + '<label class="f">Telefon<input class="mono" name="phone" required value="'+esc(e.phone)+'" placeholder="+48 600 000 000"></label>'
         + '</div><label class="check" style="margin-top:.5rem"><input type="checkbox" name="primary"'+(e.primary?" checked":"")+'> Kontakt pierwszego wyboru</label>',
       read: f => ({name:f.name.value.trim(), relation:f.relation.value.trim(), phone:f.phone.value.trim(), primary:f.primary.checked}) }
@@ -1540,13 +1785,13 @@ async function renderTab(){
   const list = CARD[cfg.key] || [];
   const editing = EDIT[cfg.key] ? list.find(x => x.id === EDIT[cfg.key]) : null;
   const draft = editing || {};
-  b.innerHTML = '<div id="rows" data-kind="'+cfg.key+'">' + (list.length ? list.map(cfg.row).join("") : '<div class="empty">Brak wpisów w tej sekcji.</div>') + '</div>'
+  b.innerHTML = '<div id="rows" data-kind="'+cfg.key+'">' + (list.length ? list.map(cfg.row).join("") : t('<div class="empty">Brak wpisów w tej sekcji.</div>')) + '</div>'
     + '<form id="fEntry" style="margin-top:1.1rem;border-top:1px solid var(--line);padding-top:1rem">'
-    + '<h4 style="margin-bottom:.7rem">'+(editing ? "Edytuj wpis" : cfg.title)+'</h4>'
+    + '<h4 style="margin-bottom:.7rem">'+(editing ? t("Edytuj wpis") : cfg.title)+'</h4>'
     + cfg.form({allergen:"",kind:"",reaction:"",severity:2,note:"",name:"",atc:"",dose:"",freq:"",route:"",since:"",anticoag:false,icd10:"",status:"",relation:"",phone:"",primary:false, ...draft})
-    + '<div class="row" style="margin-top:.8rem"><button class="btn btn-primary" type="submit">'+(editing?"Zapisz zmianę":"Dodaj")+'</button>'
-    + (editing ? '<button class="btn" type="button" id="cancelEdit">Anuluj</button>' : "")
-    + '<span class="tiny muted">Wpis zostanie oznaczony jako: '+(src==="lekarz" && DOCTOR ? esc(DOCTOR.name)+", PWZ "+esc(DOCTOR.pwz) : "wpis pacjenta")+'</span></div></form>';
+    + '<div class="row" style="margin-top:.8rem"><button class="btn btn-primary" type="submit">'+(editing?t("Zapisz zmianę"):t("Dodaj"))+'</button>'
+    + (editing ? t('<button class="btn" type="button" id="cancelEdit">Anuluj</button>') : "")
+    + '<span class="tiny muted">'+esc(tf("Wpis zostanie oznaczony jako: {0}", src==="lekarz" && DOCTOR ? kontoOpis(DOCTOR) : t("wpis pacjenta")))+'</span></div></form>';
 
   document.getElementById("rows").addEventListener("click", async ev => {
     const btn = ev.target.closest("[data-act]"); if(!btn) return;
@@ -1555,7 +1800,7 @@ async function renderTab(){
       const zakladka = TAB;
       CARD[cfg.key] = list.filter(x => x.id !== id);
       await persist();
-      toast("Wpis usunięty");
+      toast(t("Wpis usunięty"));
       /* Zapis bywa wolniejszy niż klikanie: przerysowujemy tylko tę zakładkę, w której się zaczął. */
       if(TAB === zakladka) renderTab();
     } else { EDIT[cfg.key] = id; renderTab(); document.getElementById("fEntry").scrollIntoView({behavior:"smooth", block:"nearest"}); }
@@ -1598,37 +1843,39 @@ async function renderCardView(){
   }
   const znane = lsOwners().slice().reverse();
   view.innerHTML = '<div class="stack" style="max-width:900px;margin-inline:auto">'
-  + '<div><p class="eyebrow">Rola: pacjent</p><h1 style="font-size:2rem">Moja karta</h1>'
-  + '<p class="muted" style="margin-top:.5rem">Identyfikator opaski i PIN otwierają kartę do edycji. Ratownikowi wystarczy sam identyfikator — PIN chroni edycję, nie odczyt ratunkowy.</p></div>'
+  + t('<div><p class="eyebrow">Rola: pacjent</p><h1 style="font-size:2rem">Moja karta</h1>')
+  + t('<p class="muted" style="margin-top:.5rem">Identyfikator z nośnika i PIN otwierają kartę do edycji. Ratownikowi wystarczy sam identyfikator — PIN chroni edycję, nie odczyt ratunkowy.</p></div>')
   /* Identyfikator ma 128 bitów losowości, więc nikt go z pamięci nie wpisze: karty otwierane
      na tym urządzeniu trzymamy na liście, a pełny identyfikator i tak zostaje w opasce. */
   + (znane.length
-      ? '<div class="panel"><div class="panel-h"><h3>Opaski znane tej przeglądarce</h3>'
-        + '<span class="tiny muted" style="margin-left:auto">otwierane tu PIN-em pacjenta</span></div>'
+      ? t('<div class="panel"><div class="panel-h"><h3>Karty znane tej przeglądarce</h3>')
+        + t('<span class="tiny muted" style="margin-left:auto">otwierane tu PIN-em pacjenta</span></div>')
         + '<div class="panel-b" id="znane">'
         + znane.map(o => '<div class="rec" data-tag="'+esc(o.tag)+'"><div class="main">'
-            + '<div class="name">'+esc(o.name || "karta bez nazwiska")+'</div>'
+            + '<div class="name">'+esc(o.name || t("karta bez nazwiska"))+'</div>'
             + '<div class="meta tagid">'+esc(o.tag)+'</div></div>'
-            + '<div class="acts"><button class="btn btn-sm" data-act="open">Otwórz</button>'
+            + t('<div class="acts"><button class="btn btn-sm" data-act="open">Otwórz</button>')
             + '<button class="btn btn-ghost btn-sm" data-act="forget">Zapomnij</button></div></div>').join("")
-        + '<p class="tiny muted" style="margin-top:.7rem">Lista leży w pamięci tej przeglądarki i nie dowodzi niczego — kartę otwiera PIN.</p>'
+        + t('<p class="tiny muted" style="margin-top:.7rem">Lista leży w pamięci tej przeglądarki i nie dowodzi niczego — kartę otwiera PIN.</p>')
         + '</div></div>'
       : "")
   + '<div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(280px,1fr));align-items:start">'
-  + '<div class="panel"><div class="panel-h"><h3>Otwórz istniejącą kartę</h3></div><div class="panel-b"><form id="fOpen" class="stack">'
-  +   '<label class="f">Identyfikator opaski<input class="mono" name="tag" required placeholder="identyfikator z opaski"></label>'
-  +   '<label class="f">PIN<input type="password" name="pin" inputmode="numeric" required placeholder="4–6 cyfr"></label>'
-  +   '<button class="btn btn-primary" type="submit">Otwórz kartę</button><p id="openErr" class="tiny" style="color:var(--crit)"></p></form></div></div>'
-  + '<div class="panel"><div class="panel-h"><h3>Załóż nową kartę</h3></div><div class="panel-b"><form id="fNew" class="stack">'
-  +   '<label class="f">Imię i nazwisko<input name="name" required placeholder="Jan Kowalski"></label>'
-  +   '<label class="f">PIN do edycji<input type="password" name="pin" inputmode="numeric" minlength="4" maxlength="6" required placeholder="4–6 cyfr"></label>'
-  +   '<label class="f">Powtórz PIN<input type="password" name="pin2" inputmode="numeric" required></label>'
-  +   '<button class="btn btn-primary" type="submit">Utwórz kartę</button><p id="newErr" class="tiny" style="color:var(--crit)"></p></form></div></div>'
+  + t('<div class="panel"><div class="panel-h"><h3>Otwórz istniejącą kartę</h3></div><div class="panel-b"><form id="fOpen" class="stack">')
+  +   t('<label class="f">Identyfikator z nośnika<input class="mono" name="tag" required placeholder="z opaski, breloka albo karty"></label>')
+  +   t('<label class="f">PIN<input type="password" name="pin" inputmode="numeric" required placeholder="4–6 cyfr"></label>')
+  +   t('<button class="btn btn-primary" type="submit">Otwórz kartę</button><p id="openErr" class="tiny" style="color:var(--crit)"></p></form></div></div>')
+  + t('<div class="panel"><div class="panel-h"><h3>Załóż nową kartę</h3></div><div class="panel-b"><form id="fNew" class="stack">')
+  +   t('<label class="f">Imię i nazwisko<input name="name" required placeholder="Jan Kowalski"></label>')
+  +   t('<label class="f">PIN do edycji<input type="password" name="pin" inputmode="numeric" minlength="4" maxlength="6" required placeholder="4–6 cyfr"></label>')
+  +   t('<label class="f">Powtórz PIN<input type="password" name="pin2" inputmode="numeric" required></label>')
+  +   '<label class="f">Co nosi pacjent<select name="kind">'+KIND.map(([k,l]) => '<option value="'+k+'">'+esc(l)+'</option>').join("")+'</select></label>'
+  +   t('<p class="tiny muted">Opaska trzyma się nadgarstka i nie gubi — dlatego trafia do osób starszych i do dzieci. Brelok wisi przy kluczach. Kolejne nośniki dołożysz w karcie; wszystkie prowadzą do tej samej treści.</p>')
+  +   t('<button class="btn btn-primary" type="submit">Utwórz kartę</button><p id="newErr" class="tiny" style="color:var(--crit)"></p></form></div></div>')
   + '</div>'
   + '<div class="notice"><span>Prototyp: ' + (API
-      ? 'karta zapisuje się w bazie serwera HERO, a jej zestaw krytyczny odczyta każdy, kto zna identyfikator opaski. Nie wprowadzaj danych, których nie chcesz tam zostawić.'
-      : 'dane tej karty zostają w pamięci tej przeglądarki i nie są wysyłane na serwer. Nie wprowadzaj danych, których nie chcesz tu zostawić.')
-    + ' Kartę można usunąć jednym przyciskiem.</span></div>'
+      ? t('karta zapisuje się w bazie serwera HERO, a jej zestaw ratunkowy odczyta każdy, kto zna identyfikator z nośnika. Nie wprowadzaj danych, których nie chcesz tam zostawić.')
+      : t('dane tej karty zostają w pamięci tej przeglądarki i nie są wysyłane na serwer. Nie wprowadzaj danych, których nie chcesz tu zostawić.'))
+    + t(' Kartę można usunąć jednym przyciskiem.</span></div>')
   + '</div>';
 
   const panelZnane = document.getElementById("znane");
@@ -1645,39 +1892,51 @@ async function renderCardView(){
 
   document.getElementById("fOpen").addEventListener("submit", async e => {
     e.preventDefault(); const f = e.target;
-    const tag = f.tag.value.trim().toUpperCase();
+    /* Pacjent przepisuje identyfikator z tego, co ma pod ręką — a to może być brelok wskazujący
+       na kartę o innym adresie własnym. PIN wiąże się z kartą, więc najpierw rozwiązujemy nośnik. */
+    const wpisany = f.tag.value.trim().toUpperCase();
+    const cel = await store.resolve(wpisany);
+    const tag = cel ? cel.tagId : wpisany;
     const r = await store.verify(tag, f.pin.value);
-    if(!r.ok){ formErr("openErr", r.reason === "pin" ? "Nieprawidłowy PIN." : "Nie ma karty o tym identyfikatorze."); return; }
+    if(!r.ok){ formErr("openErr", r.reason === "pin" ? t("Nieprawidłowy PIN.") : t("Nie ma karty o tym identyfikatorze.")); return; }
     markOwner(tag, r.card.person && r.card.person.name);
     CARD = r.card; ROLE = "pacjent"; TAB = "podstawowe"; ses.set({tagId:tag, role:"pacjent", dg:PIN_DG}); renderEditor();
   });
   document.getElementById("fNew").addEventListener("submit", async e => {
     e.preventDefault(); const f = e.target;
-    if(f.pin.value !== f.pin2.value){ formErr("newErr", "PIN-y się różnią."); return; }
+    if(f.pin.value !== f.pin2.value){ formErr("newErr", t("PIN-y się różnią.")); return; }
     const tag = genTag(); const c = blankCard(tag);
     c.person.name = f.name.value.trim();
     c.pinHash = await digest(tag, f.pin.value);
+    /* Adres własny karty jest zarazem jej pierwszym nośnikiem — rodzaj wybiera pacjent tutaj. */
+    c.carrier = {kind: f.kind.value, label: ""};
+    if(!API){
+      const nos = lsCarriers();
+      nos[tag] = {tagId:tag, cardId:tag, kind:f.kind.value, label:"", createdAt:nowISO(), revokedAt:null};
+      lsCarriersSave(nos);
+    }
     PIN_DG = c.pinHash;
     CARD = c; ROLE = "pacjent";
-    /* Karta bez opaski jest tylko adresem, więc zaraz po założeniu wchodzimy w jej zapis. */
-    TAB = "opaska";
+    /* Karta bez nośnika jest tylko adresem, więc zaraz po założeniu wchodzimy w jego zapis. */
+    TAB = "nosniki";
     const zapisana = await store.save(c);
     if(zapisana && zapisana.tagId) CARD = zapisana;
     markOwner(tag, c.person.name); ses.set({tagId:tag, role:"pacjent", dg:PIN_DG});
-    renderEditor(); toast("Karta " + tag + " utworzona");
+    renderEditor(); toast(t("Karta ") + tag + " utworzona");
   });
 }
 
 function docBar(){
   const ile = Number(DOCTOR.sessions || 0);
   return '<div class="panel"><div class="panel-h">'
-  + '<div><p class="eyebrow">Zalogowane konto lekarza</p>'
-  + '<h3>' + esc(DOCTOR.name) + ' <span class="mono tiny muted">PWZ ' + esc(DOCTOR.pwz) + '</span></h3>'
-  + (ile > 1 ? '<p class="tiny muted">Zalogowanych urządzeń: ' + ile + '</p>' : "")
+  + '<div><p class="eyebrow">' + esc(tf("Zalogowane konto: {0}", t(kontoRola(DOCTOR)))) + '</p>'
+  + '<h3>' + esc(DOCTOR.name) + ' <span class="mono tiny muted">'
+  +   esc(kontoRola(DOCTOR) === "ratownik" ? "nr " + DOCTOR.pwz : "PWZ " + DOCTOR.pwz) + '</span></h3>'
+  + (ile > 1 ? t('<p class="tiny muted">Zalogowanych urządzeń: ') + ile + '</p>' : "")
   + '</div>'
   + '<div class="row" style="margin-left:auto">'
-  +   '<button class="btn btn-sm" id="docOut">Wyloguj z konta</button>'
-  +   (API ? '<button class="btn btn-sm" id="docOutAll">Wyloguj wszędzie</button>' : "")
+  +   t('<button class="btn btn-sm" id="docOut">Wyloguj z konta</button>')
+  +   (API ? t('<button class="btn btn-sm" id="docOutAll">Wyloguj wszędzie</button>') : "")
   + '</div></div></div>';
 }
 function wireDocBar(){
@@ -1685,35 +1944,54 @@ function wireDocBar(){
   if(b) b.addEventListener("click", async () => { await doctors.logout(); ses.clear(); CARD = null; renderDoctorView(); });
   const w = document.getElementById("docOutAll");
   if(w) w.addEventListener("click", async () => {
-    if(!confirm("Wylogować konto ze wszystkich urządzeń? Token sesji przestanie działać także tam, gdzie zostawiłeś go otwarty.")) return;
+    if(!confirm(t("Wylogować konto ze wszystkich urządzeń? Token sesji przestanie działać także tam, gdzie zostawiłeś go otwarty."))) return;
     await doctors.logoutAll();
     ses.clear(); CARD = null;
-    toast("Konto wylogowane ze wszystkich urządzeń");
+    toast(t("Konto wylogowane ze wszystkich urządzeń"));
     renderDoctorView();
   });
 }
 
-/** Ekran logowania i zakładania konta lekarza. `dalej` wraca tam, skąd przyszło żądanie konta. */
+/** Ekran logowania i zakładania konta zawodowego: lekarz albo ratownik medyczny. */
 function renderDoctorAuth(dalej){
   const next = dalej || renderDoctorView;
   view.innerHTML = '<div class="stack" style="max-width:900px;margin-inline:auto">'
-  + '<div><p class="eyebrow">Rola: lekarz</p><h1 style="font-size:2rem">Panel lekarza</h1>'
-  + '<p class="muted" style="margin-top:.5rem">Konto lekarza służy do podpisywania wpisów: przy każdym rozpoznaniu, leku i alergii, którą dopiszesz, zostaje twoje nazwisko i numer prawa wykonywania zawodu. Ratownik widzi wtedy różnicę między deklaracją pacjenta a wpisem lekarskim.</p></div>'
+  + t('<div><p class="eyebrow">Konto zawodowe</p><h1 style="font-size:2rem">Lekarz albo ratownik medyczny</h1>')
+  + t('<p class="muted" style="margin-top:.5rem">Konto otwiera kartę w całości: nazwisko pacjenta, kontakty alarmowe i pełną listę rozpoznań. Bez konta zostaje sam zestaw ratunkowy — grupa krwi, alergie, antykoagulanty, wszczepy, DNR. Każde otwarcie karty kontem zapisuje się w jej historii, razem z nazwiskiem i numerem.</p></div>')
   + '<div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(280px,1fr));align-items:start">'
-  + '<div class="panel"><div class="panel-h"><h3>Zaloguj się</h3></div><div class="panel-b"><form id="fLogin" class="stack">'
-  +   '<label class="f">Numer PWZ<input class="mono" name="pwz" inputmode="numeric" maxlength="7" required placeholder="1234567"></label>'
-  +   '<label class="f">Hasło<input type="password" name="password" required></label>'
-  +   '<button class="btn btn-primary" type="submit">Zaloguj</button><p id="loginErr" class="tiny" style="color:var(--crit)"></p>'
+  + t('<div class="panel"><div class="panel-h"><h3>Zaloguj się</h3></div><div class="panel-b"><form id="fLogin" class="stack">')
+  +   t('<label class="f">Numer PWZ albo numer ratownika<input class="mono" name="pwz" maxlength="20" required placeholder="1234567"></label>')
+  +   t('<label class="f">Hasło<input type="password" name="password" required></label>')
+  +   t('<button class="btn btn-primary" type="submit">Zaloguj</button><p id="loginErr" class="tiny" style="color:var(--crit)"></p>')
   + '</form></div></div>'
-  + '<div class="panel"><div class="panel-h"><h3>Załóż konto</h3></div><div class="panel-b"><form id="fReg" class="stack">'
-  +   '<label class="f">Imię i nazwisko<input name="name" required placeholder="dr Tomasz Lewandowski"></label>'
-  +   '<label class="f">Numer PWZ<input class="mono" name="pwz" inputmode="numeric" maxlength="7" required placeholder="1234567"></label>'
-  +   '<label class="f">Hasło<input type="password" name="password" minlength="8" required placeholder="co najmniej 8 znaków"></label>'
-  +   '<button class="btn btn-primary" type="submit">Załóż konto</button><p id="regErr" class="tiny" style="color:var(--crit)"></p>'
+  + t('<div class="panel"><div class="panel-h"><h3>Załóż konto</h3></div><div class="panel-b"><form id="fReg" class="stack">')
+  +   t('<label class="f">Zawód<select name="role"><option value="lekarz">Lekarz</option><option value="ratownik">Ratownik medyczny</option></select></label>')
+  +   t('<label class="f"><span id="regNrLbl">Numer PWZ</span><input class="mono" name="pwz" id="regNr" inputmode="numeric" maxlength="7" required placeholder="1234567"></label>')
+  +   t('<label class="f">Imię i nazwisko<input name="name" required placeholder="dr Tomasz Lewandowski"></label>')
+  +   t('<label class="f">Hasło<input type="password" name="password" minlength="8" required placeholder="co najmniej 8 znaków"></label>')
+  +   '<p id="regHint" class="tiny muted"></p>'
+  +   t('<button class="btn btn-primary" type="submit">Załóż konto</button><p id="regErr" class="tiny" style="color:var(--crit)"></p>')
   + '</form></div></div>'
   + '</div>'
-  + '<div class="notice"><span>Numer PWZ sprawdzamy tylko co do formatu — siedem cyfr. Nie liczymy cyfry kontrolnej i nie odpytujemy rejestru Naczelnej Izby Lekarskiej, więc konto nie jest dowodem uprawnień. To zostaje do zrobienia przed wdrożeniem.</span></div>'
+  + t('<div class="notice warn"><span>Numer sprawdzamy tylko co do formatu: siedem cyfr u lekarza, od czterech do dwudziestu znaków u ratownika. Nie odpytujemy rejestru Naczelnej Izby Lekarskiej ani rejestru ratowników medycznych, więc konto samo w sobie nie jest dowodem uprawnień. Weryfikacja w rejestrze zostaje do zrobienia przed wdrożeniem.</span></div>')
+  + t('<p class="tiny muted">Konto lekarza dodatkowo podpisuje wpisy w karcie: przy rozpoznaniu, leku i alergii zostaje nazwisko i numer PWZ. Ratownik kartę czyta, ale jej nie redaguje.</p>')
   + '</div>';
+
+  const fReg = document.getElementById("fReg");
+  /* Numer wygląda inaczej u lekarza i u ratownika, więc pole opisuje się samo po zmianie zawodu. */
+  const opiszNumer = () => {
+    const ratownik = fReg.role.value === "ratownik";
+    const nr = document.getElementById("regNr");
+    document.getElementById("regNrLbl").textContent = ratownik ? t("Numer w rejestrze ratowników") : t("Numer PWZ");
+    document.getElementById("regHint").textContent = ratownik
+      ? t("Numer z rejestru ratowników medycznych — od 4 do 20 znaków, cyfry, litery, znak / albo -.")
+      : t("Siedem cyfr z prawa wykonywania zawodu.");
+    nr.maxLength = ratownik ? 20 : 7;
+    nr.inputMode = ratownik ? "text" : "numeric";
+    nr.placeholder = ratownik ? "12345/2019" : "1234567";
+  };
+  fReg.role.addEventListener("change", opiszNumer);
+  opiszNumer();
 
   document.getElementById("fLogin").addEventListener("submit", async e => {
     e.preventDefault(); const f = e.target;
@@ -1721,51 +1999,65 @@ function renderDoctorAuth(dalej){
     if(!r.ok){ formErr("loginErr", r.error); return; }
     next();
   });
-  document.getElementById("fReg").addEventListener("submit", async e => {
+  fReg.addEventListener("submit", async e => {
     e.preventDefault(); const f = e.target;
-    const r = await doctors.register({pwz:f.pwz.value, name:f.name.value, password:f.password.value});
+    const r = await doctors.register({pwz:f.pwz.value, name:f.name.value, password:f.password.value, role:f.role.value});
     if(!r.ok){ formErr("regErr", r.error); return; }
     const zal = await doctors.login({pwz:f.pwz.value, password:f.password.value});
     if(!zal.ok){ formErr("regErr", zal.error); return; }
-    toast("Konto założone");
+    toast(t("Konto założone"));
     next();
   });
 }
 
+/**
+ * Panel konta zawodowego. Lekarz otwiera kartę do edycji PIN-em pacjenta; ratownik czyta ją bez
+ * PIN-u, bo nieprzytomny pacjent go nie poda — uprawnieniem jest samo konto, a odczyt zostaje
+ * w historii karty.
+ */
 async function renderDoctorView(){
   await doctors.restore();
   if(!DOCTOR) return renderDoctorAuth();
+  const ratownik = kontoRola(DOCTOR) === "ratownik";
 
   const s = ses.get();
-  if(s && s.role === "lekarz" && s.dg){
+  if(!ratownik && s && s.role === "lekarz" && s.dg){
     const r = await store.openWithDigest(s.tagId, s.dg);
     if(r.ok){ CARD = r.card; ROLE = "lekarz"; renderEditor(); return; }
     ses.clear();
   }
 
   view.innerHTML = '<div class="stack gate">'
-  + '<div><p class="eyebrow">Rola: lekarz</p><h1 style="font-size:2rem">Otwórz kartę pacjenta</h1>'
-  + '<p class="muted" style="margin-top:.5rem">Pacjent podaje identyfikator opaski i swój PIN. Wpisy, które dodasz, zostaną podpisane twoim kontem.</p></div>'
+  + t('<div><p class="eyebrow">Konto zawodowe: ') + esc(t(kontoRola(DOCTOR))) + t('</p><h1 style="font-size:2rem">Otwórz kartę pacjenta</h1>')
+  + '<p class="muted" style="margin-top:.5rem">' + (ratownik
+      ? t("Wystarczy identyfikator z opaski albo breloka — konto ratownika otwiera kartę w całości, bez PIN-u.")
+      : t("Sam identyfikator otwiera kartę do odczytu. PIN pacjenta jest potrzebny dopiero do edycji: wpisy, które dodasz, zostaną podpisane twoim kontem.")) + '</p></div>'
   + docBar()
   + '<div class="panel"><div class="panel-b"><form id="fDoc" class="stack">'
-  +   '<label class="f">Identyfikator opaski<input class="mono" name="tag" required placeholder="identyfikator z opaski"></label>'
-  +   '<label class="f">Kod dostępu (PIN pacjenta)<input type="password" name="pin" inputmode="numeric" required></label>'
-  +   '<button class="btn btn-primary" type="submit">Otwórz kartę pacjenta</button><p id="docErr" class="tiny" style="color:var(--crit)"></p>'
+  +   t('<label class="f">Identyfikator z nośnika<input class="mono" name="tag" required placeholder="z opaski, breloka albo karty"></label>')
+  +   (ratownik ? "" : t('<label class="f">Kod dostępu (PIN pacjenta) — zostaw pusty, żeby tylko odczytać<input type="password" name="pin" inputmode="numeric"></label>'))
+  +   t('<button class="btn btn-primary" type="submit">Otwórz kartę pacjenta</button><p id="docErr" class="tiny" style="color:var(--crit)"></p>')
   + '</form></div></div>'
-  + '<p class="tiny muted">Otwarcie karty zapisuje się w historii odczytów widocznej dla pacjenta — razem z twoim nazwiskiem i numerem PWZ.</p></div>';
+  + t('<p class="tiny muted">Otwarcie karty zapisuje się w historii odczytów widocznej dla pacjenta — razem z twoim nazwiskiem i numerem.</p></div>');
 
   wireDocBar();
   document.getElementById("fDoc").addEventListener("submit", async e => {
     e.preventDefault(); const f = e.target;
-    const tag = f.tag.value.trim().toUpperCase();
-    const r = await store.verify(tag, f.pin.value);
-    if(!r.ok){ formErr("docErr", r.reason === "pin" ? "Nieprawidłowy kod dostępu." : "Nie ma karty o tym identyfikatorze."); return; }
-    const entry = await store.logRead(tag, DOCTOR.name + ", PWZ " + DOCTOR.pwz, "dostęp lekarza");
+    const wpisany = f.tag.value.trim().toUpperCase();
+    const pin = f.pin ? f.pin.value : "";
+    /* Bez PIN-u konto idzie tą samą drogą co po zbliżeniu nośnika: pełna karta do odczytu. */
+    if(!pin){ location.hash = "#/t/" + encodeURIComponent(wpisany); return; }
+    const cel = await store.resolve(wpisany);
+    const tag = cel ? cel.tagId : wpisany;
+    const r = await store.verify(tag, pin);
+    if(!r.ok){ formErr("docErr", r.reason === "pin" ? t("Nieprawidłowy kod dostępu.") : t("Nie ma karty o tym identyfikatorze.")); return; }
+    const entry = await store.logRead(tag, kontoOpis(DOCTOR), t("dostęp lekarza"));
     r.card.reads = [entry].concat(r.card.reads || []);
     CARD = r.card; ROLE = "lekarz"; TAB = "podstawowe"; ses.set({tagId:tag, role:"lekarz", dg:PIN_DG});
     renderEditor();
   });
 }
+
 
 /* ---------------- karta do portfela ---------------- */
 /**
@@ -1785,37 +2077,37 @@ function printHTML(card){
 
   const alergie = roAllergies(c)
     .map(x => '<span class="' + (Number(x.severity) >= 3 ? "waga" : "") + '">' + esc(x.allergen) + '</span> — '
-      + esc(SEV[Number(x.severity) || 1]) + (x.reaction ? ', ' + esc(x.reaction) : ""));
+      + esc(t(SEV[Number(x.severity) || 1])) + (x.reaction ? ', ' + esc(x.reaction) : ""));
   const leki = roMeds(c)
     .map(m => '<span class="' + (m.anticoag ? "waga" : "") + '">' + esc(m.name) + '</span> '
-      + esc([m.dose, m.freq].filter(Boolean).join(", ")) + (m.anticoag ? ' — ANTYKOAGULANT' : ""));
+      + esc([m.dose, m.freq].filter(Boolean).join(", ")) + (m.anticoag ? ' — ' + esc(t("ANTYKOAGULANT")) : ""));
   const choroby = (c.conditions || []).map(x => esc(x.name) + (x.icd10 ? ' (' + esc(x.icd10) + ')' : "")
-    + (x.status ? ' — ' + esc(x.status) : ""));
+    + (x.status ? ' — ' + esc(t(x.status)) : ""));
   const kontakty = (c.contacts || []).map(k => esc(k.name) + (k.relation ? ', ' + esc(k.relation) : "")
-    + ' — ' + esc(k.phone) + (k.primary ? ' (pierwszy)' : ""));
+    + ' — ' + esc(k.phone) + (k.primary ? ' (' + esc(t("pierwszy")) + ')' : ""));
   const flagi = []
-    .concat(p.dnr ? ["zgłoszone oświadczenie DNR"] : [])
-    .concat(p.donor ? ["zgoda na pobranie narządów"] : [])
+    .concat(p.dnr ? [esc(t("zgłoszone oświadczenie DNR"))] : [])
+    .concat(p.donor ? [esc(t("zgoda na pobranie narządów"))] : [])
     .concat(p.devices ? [esc(p.devices)] : [])
     .concat(p.note ? [esc(p.note)] : []);
 
   return '<div class="druk">'
   + '<div class="druk-head"><div>'
-  +   '<p class="eyebrow">Karta ratunkowa HERO · MediTag</p>'
-  +   '<h2>' + esc(p.name || "Pacjent nieznany") + '</h2>'
-  +   '<p class="small">' + esc(fmtD(p.birthDate)) + (a !== null ? ' · ' + a + ' lat' : "")
-  +     ' · grupa krwi <span class="waga">' + esc((p.blood || "?") + (p.rh || "")) + '</span>'
+  +   '<p class="eyebrow">' + esc(t("Karta ratunkowa HERO · MediTag")) + '</p>'
+  +   '<h2>' + esc(p.name || t("Pacjent nieznany")) + '</h2>'
+  +   '<p class="small">' + esc(fmtD(p.birthDate)) + (a !== null ? ' · ' + esc(tf("{0} lat", a)) : "")
+  +     ' · ' + esc(t("grupa krwi")) + ' <span class="waga">' + esc((p.blood || "?") + (p.rh || "")) + '</span>'
   +     (p.weightKg ? ' · ' + esc(p.weightKg) + ' kg' : "") + '</p>'
-  +   (p.langs ? '<p class="tiny muted">Języki kontaktu: ' + esc(p.langs) + '</p>' : "")
-  + '</div>' + (url ? qrSvg(url, "Kod QR z adresem karty " + card.tagId) : "") + '</div>'
-  + sekcja("Alergie", lista(alergie, "Nie zgłoszono żadnej alergii."))
-  + sekcja("Przyjmowane leki", lista(leki, "Nie zgłoszono leków."))
-  + sekcja("Choroby przewlekłe", lista(choroby, "Nie zgłoszono chorób przewlekłych."))
-  + (flagi.length ? sekcja("Uwagi istotne dla zespołu", lista(flagi, "")) : "")
-  + sekcja("Kontakty alarmowe", lista(kontakty, "Brak kontaktów alarmowych."))
-  + '<div class="stopka"><span>Karta <span class="tagid">' + esc(card.tagId) + '</span> · aktualizacja '
-  +   esc(fmtDT(card.updatedAt)) + '</span>'
-  +   '<span>Prototyp. Nie jest wyrobem medycznym i nie zastępuje wywiadu ratowniczego.</span></div>'
+  +   (p.langs ? '<p class="tiny muted">' + esc(tf("Języki kontaktu: {0}", p.langs)) + '</p>' : "")
+  + '</div>' + (url ? qrSvg(url, tf("Kod QR z adresem karty {0}", card.tagId)) : "") + '</div>'
+  + sekcja(t("Alergie"), lista(alergie, t("Nie zgłoszono żadnej alergii.")))
+  + sekcja(t("Przyjmowane leki"), lista(leki, t("Nie zgłoszono leków.")))
+  + sekcja(t("Choroby przewlekłe"), lista(choroby, t("Nie zgłoszono chorób przewlekłych.")))
+  + (flagi.length ? sekcja(t("Uwagi istotne dla zespołu"), lista(flagi, "")) : "")
+  + sekcja(t("Kontakty alarmowe"), lista(kontakty, t("Brak kontaktów alarmowych.")))
+  + '<div class="stopka"><span>' + esc(t("Karta")) + ' <span class="tagid">' + esc(card.tagId) + '</span> · '
+  +   esc(tf("aktualizacja {0}", fmtDT(card.updatedAt))) + '</span>'
+  +   '<span>' + esc(t("Prototyp. Nie jest wyrobem medycznym i nie zastępuje wywiadu ratowniczego.")) + '</span></div>'
   + '</div>';
 }
 
@@ -1823,21 +2115,22 @@ function printHTML(card){
 function renderPrint(card, wroc){
   view.innerHTML = printHTML(card)
   + '<div class="row bez-druku" style="margin-top:1rem;justify-content:center">'
-  +   '<button class="btn btn-primary" id="doDruku">Drukuj</button>'
-  +   '<button class="btn" id="wrocZDruku">Wróć</button>'
+  +   t('<button class="btn btn-primary" id="doDruku">Drukuj</button>')
+  +   t('<button class="btn" id="wrocZDruku">Wróć</button>')
   + '</div>'
-  + '<p class="tiny muted bez-druku" style="text-align:center;margin-top:.6rem">Wydruk mieści się na jednej stronie. Kod QR prowadzi pod ten sam adres co opaska.</p>';
+  + t('<p class="tiny muted bez-druku" style="text-align:center;margin-top:.6rem">Wydruk mieści się na jednej stronie. Kod QR prowadzi pod ten sam adres co opaska.</p>');
   document.getElementById("doDruku").addEventListener("click", () => window.print());
   document.getElementById("wrocZDruku").addEventListener("click", wroc);
 }
 
 /* ---------------- opaska: ekran po zbliżeniu ---------------- */
-/** Przełącznik roli. Adres w opasce jest jeden, więc rolę trzeba dać się zmienić ręcznie. */
+/** Przełącznik roli. Adres w nośniku jest jeden, więc rolę trzeba dać się zmienić ręcznie. */
 function roleBar(tagId, biezaca){
   const b = (k, etykieta) => '<a class="btn btn-sm'+(biezaca===k?" btn-primary":"")+'" href="#/t/'+encodeURIComponent(tagId)+'?rola='+k+'">'+etykieta+'</a>';
+  /* „ratownik" to wejście bez konta — zestaw ratunkowy. Konto zawodowe otwiera kartę w całości. */
   return '<div class="panel"><div class="panel-h">'
-  + '<div><p class="eyebrow">Opaska <span class="tagid">'+esc(tagId)+'</span></p><h3>Kto zbliżył opaskę?</h3></div>'
-  + '<div class="row" style="margin-left:auto">'+b("ratownik","Ratownik")+b("lekarz","Lekarz")+b("pacjent","To moja karta")+'</div>'
+  + t('<div><p class="eyebrow">Nośnik <span class="tagid">')+esc(tagId)+t('</span></p><h3>Kto go zbliżył?</h3></div>')
+  + '<div class="row" style="margin-left:auto">'+b("ratownik",t("Bez konta"))+b("lekarz",t("Konto zawodowe"))+b("pacjent",t("To moja karta"))+'</div>'
   + '</div></div>';
 }
 
@@ -1847,22 +2140,22 @@ function tagGate(tagId, rola){
   view.innerHTML = '<div class="stack" style="max-width:760px;margin-inline:auto">'
   + roleBar(tagId, rola)
   + (doc ? docBar() : "")
-  + '<div class="panel"><div class="panel-h"><h3>'+(doc ? "Otwórz kartę pacjenta" : "Otwórz swoją kartę")+'</h3></div>'
+  + '<div class="panel"><div class="panel-h"><h3>'+(doc ? t("Otwórz kartę pacjenta") : t("Otwórz swoją kartę"))+'</h3></div>'
   + '<div class="panel-b"><form id="fTag" class="stack">'
   +   '<p class="small muted">'+(doc
-        ? "Karta otwiera się PIN-em pacjenta. Otwarcie trafi do historii razem z twoim nazwiskiem i numerem PWZ, a twoje wpisy dostaną twój podpis."
-        : "PIN otwiera kartę do edycji. Ratownikowi wystarczy sam identyfikator opaski — PIN chroni edycję, nie odczyt ratunkowy.")+'</p>'
-  +   '<label class="f">'+(doc ? "Kod dostępu (PIN pacjenta)" : "PIN")+'<input type="password" name="pin" inputmode="numeric" required></label>'
-  +   '<button class="btn btn-primary" type="submit">Otwórz kartę</button><p id="tagErr" class="tiny" style="color:var(--crit)"></p>'
+        ? t("Karta otwiera się PIN-em pacjenta. Otwarcie trafi do historii razem z twoim nazwiskiem i numerem PWZ, a twoje wpisy dostaną twój podpis.")
+        : t("PIN otwiera kartę do edycji. Ratownikowi wystarczy sam identyfikator z nośnika — PIN chroni edycję, nie odczyt ratunkowy."))+'</p>'
+  +   '<label class="f">'+(doc ? t("Kod dostępu (PIN pacjenta)") : t("PIN"))+'<input type="password" name="pin" inputmode="numeric" required></label>'
+  +   t('<button class="btn btn-primary" type="submit">Otwórz kartę</button><p id="tagErr" class="tiny" style="color:var(--crit)"></p>')
   + '</form></div></div></div>';
 
   if(doc) wireDocBar();
   document.getElementById("fTag").addEventListener("submit", async e => {
     e.preventDefault();
     const r = await store.verify(tagId, e.target.pin.value);
-    if(!r.ok){ formErr("tagErr", r.reason === "pin" ? "Nieprawidłowy PIN." : "Nie ma karty o tym identyfikatorze."); return; }
+    if(!r.ok){ formErr("tagErr", r.reason === "pin" ? t("Nieprawidłowy PIN.") : t("Nie ma karty o tym identyfikatorze.")); return; }
     if(doc){
-      const entry = await store.logRead(tagId, DOCTOR.name + ", PWZ " + DOCTOR.pwz, "dostęp lekarza");
+      const entry = await store.logRead(tagId, kontoOpis(DOCTOR), readCtx(DOCTOR));
       r.card.reads = [entry].concat(r.card.reads || []);
     } else markOwner(tagId, r.card.person && r.card.person.name);
     CARD = r.card; ROLE = doc ? "lekarz" : "pacjent"; TAB = "podstawowe";
@@ -1876,8 +2169,8 @@ async function tagReadout(tagId){
   const card = await store.get(tagId);
   if(!card){
     view.innerHTML = '<div class="stack" style="max-width:760px;margin-inline:auto">' + roleBar(tagId, "ratownik")
-    + '<div class="notice crit"><span>Opaska <b class="tagid">'+esc(tagId)+'</b> wskazuje kartę, której nie ma '
-    + (API ? "w bazie tego serwera." : "w pamięci tej przeglądarki.") + ' Karta mogła zostać usunięta.</span></div></div>';
+    + t('<div class="notice crit"><span>Nośnik <b class="tagid">')+esc(tagId)+t('</b> wskazuje kartę, której nie ma ')
+    + (API ? t("w bazie tego serwera.") : t("w pamięci tej przeglądarki.")) + t(' Karta mogła zostać usunięta.</span></div></div>');
     return;
   }
   if(card.revoked){
@@ -1885,12 +2178,29 @@ async function tagReadout(tagId){
     + revokedHTML(tagId, card.revokedAt) + '</div>';
     return;
   }
-  const entry = await store.logRead(tagId, "odczyt po zbliżeniu opaski", "odczyt ratunkowy");
-  view.innerHTML = '<div class="stack">' + roleBar(tagId, "ratownik")
-  + readoutHTML(critical(card), entry)
-  + '<div class="row"><button class="btn btn-sm" id="copyHand">Skopiuj podsumowanie do przekazania</button>'
-  + '<a class="btn btn-sm" href="#/odczyt?tag='+encodeURIComponent(tagId)+'">Odczytaj z opisem czytnika</a></div></div>';
-  wireHandover(card);
+  /* Z kontem zawodowym ślad zapisuje serwer przy odczycie karty — drugi wpis byłby zdublowany. */
+  const zKontem = !!(DOCTOR && (API || DOCTOR.token === null));
+  const entry = (API && DOCTOR)
+    ? ((card.reads || [])[0] || {at: nowISO(), by: kontoOpis(DOCTOR)})
+    : await store.logRead(tagId, zKontem ? kontoOpis(DOCTOR)
+        : opisZblizenia(card.carrier && card.carrier.kind),
+        zKontem ? readCtx(DOCTOR) : "odczyt ratunkowy");
+  /* Przerysowanie po zmianie języka idzie z już pobranej karty: drugi odczyt nie trafia do historii. */
+  const rysuj = () => {
+    view.innerHTML = '<div class="stack">' + roleBar(tagId, DOCTOR ? "lekarz" : "ratownik")
+    + (card.rescue
+        ? t('<div class="notice"><span>To zestaw ratunkowy: wszystko, co pozwala pomóc, bez nazwiska i kontaktów. Kartę w całości otwiera konto lekarza albo ratownika medycznego.</span></div>')
+        : t('<div class="notice ok"><span>Karta otwarta kontem: ') + esc(kontoOpis(DOCTOR)) + t('. Ten odczyt jest zapisany w historii karty.</span></div>'))
+    + readoutHTML(card.rescue ? card : critical(card), entry)
+    + t('<div class="row"><button class="btn btn-sm" id="copyHand">Skopiuj podsumowanie do przekazania</button>')
+    + (card.rescue
+        ? '<a class="btn btn-sm btn-primary" href="#/t/'+encodeURIComponent(tagId)+t('?rola=lekarz">Otwórz kartę kontem zawodowym</a>')
+        : (kontoRola(DOCTOR) === "lekarz" ? '<a class="btn btn-sm" href="#/t/'+encodeURIComponent(tagId)+t('?rola=edycja">Otwórz do edycji (PIN pacjenta)</a>') : ""))
+    + '<a class="btn btn-sm" href="#/odczyt?tag='+encodeURIComponent(tagId)+t('">Odczytaj z opisem czytnika</a></div></div>');
+    wireHandover(card);
+    REPAINT = rysuj;
+  };
+  rysuj();
 }
 
 /**
@@ -1901,29 +2211,86 @@ async function tagReadout(tagId){
  */
 async function renderTagLanding(tagId, params){
   if(!TAG_RE.test(tagId)){
-    view.innerHTML = '<div class="notice crit"><span>Adres z opaski nie niesie poprawnego identyfikatora karty.</span></div>';
+    view.innerHTML = t('<div class="notice crit"><span>Adres z nośnika nie niesie poprawnego identyfikatora karty.</span></div>');
     return;
   }
-  view.innerHTML = '<p class="muted">Otwieram kartę z opaski…</p>';
+  view.innerHTML = t('<p class="muted">Otwieram kartę z nośnika…</p>');
   await doctors.restore();
+  /* Identyfikator z nośnika prowadzi do karty, której adres własny bywa inny — skrót PIN-u wiąże
+     się z adresem karty, więc wejścia po PIN-ie zaczynają się od rozwiązania nośnika. */
+  const cel = await store.resolve(tagId);
+  const cardId = cel ? cel.tagId : tagId;
   const s = ses.get();
   const rola = params.get("rola");
-  const wybor = rola || (s && s.tagId === tagId && s.dg ? s.role : isOwner(tagId) ? "pacjent" : DOCTOR ? "lekarz" : "ratownik");
+  const wybor = rola || (s && s.tagId === cardId && s.dg ? s.role : isOwner(cardId) ? "pacjent" : DOCTOR ? "lekarz" : "ratownik");
 
   /* Otwarta sesja tej samej roli wchodzi do karty bez pytania o PIN drugi raz. */
-  if((wybor === "pacjent" || wybor === "lekarz") && s && s.tagId === tagId && s.role === wybor && s.dg){
-    const r = await store.openWithDigest(tagId, s.dg);
+  if((wybor === "pacjent" || wybor === "lekarz") && s && s.tagId === cardId && s.role === wybor && s.dg){
+    const r = await store.openWithDigest(cardId, s.dg);
     if(r.ok){ CARD = r.card; ROLE = wybor; TAB = "podstawowe"; renderEditor(); return; }
     ses.clear();
   }
-  if(wybor === "lekarz" && !DOCTOR) return renderDoctorAuth(route);
-  if(wybor === "pacjent" || wybor === "lekarz") return tagGate(tagId, wybor);
+  /* Konto zawodowe nie pyta o PIN, żeby zobaczyć kartę: nieprzytomny pacjent go nie poda. PIN
+     zostaje przy edycji, i po to jest osobne wejście „edycja". */
+  if((wybor === "lekarz" || wybor === "edycja") && !DOCTOR) return renderDoctorAuth(route);
+  if(wybor === "edycja") return tagGate(cardId, "lekarz");
+  if(wybor === "pacjent") return tagGate(cardId, "pacjent");
   return tagReadout(tagId);
+}
+
+/* ---------------- ustawienia ---------------- */
+/**
+ * Język i motyw. Oba wybory leżą w pamięci tej przeglądarki i nie wychodzą na serwer, więc na innym
+ * telefonie trzeba je ustawić od nowa. „Jak w telefonie" i „jak w systemie" znaczą: nic nie
+ * zapamiętujemy i idziemy za ustawieniem urządzenia.
+ */
+function renderSettings(){
+  const grupa = (nazwa, biezacy, opcje) => '<div class="seg" data-grupa="' + nazwa + '">'
+    + opcje.map(([w, etykieta]) => '<button type="button" data-wybor="' + w + '" aria-pressed="'
+        + (biezacy === w) + '">' + esc(etykieta) + '</button>').join("")
+    + '</div>';
+
+  view.innerHTML = '<div class="stack" id="ustawienia" style="max-width:760px;margin-inline:auto">'
+  + '<div><p class="eyebrow">' + esc(t("Ustawienia")) + '</p><h1 style="font-size:2rem">' + esc(t("Język i wygląd")) + '</h1>'
+  + '<p class="muted" style="margin-top:.5rem">' + esc(t("Oba ustawienia zostają w pamięci tej przeglądarki i nie wychodzą na serwer. Na innym telefonie trzeba je wybrać jeszcze raz.")) + '</p></div>'
+
+  + '<div class="panel"><div class="panel-h"><h3>' + esc(t("Język")) + '</h3></div><div class="panel-b">'
+  +   grupa("jezyk", LANG_WYBOR, [["auto", t("Jak w telefonie")], ["pl", "Polski"], ["en", "English"]])
+  +   '<p class="tiny muted" style="margin-top:.7rem">'
+  +     esc(LANG_WYBOR === "auto"
+        ? tf("Teraz: {0} — tak ustawiony jest ten telefon.", LANG === "en" ? "English" : "Polski")
+        : t("Wybór zapamiętany. Ratownik z innym telefonem i tak zobaczy odczyt w swoim języku, bo liczy się ustawienie jego urządzenia."))
+  +   '</p></div></div>'
+
+  + '<div class="panel"><div class="panel-h"><h3>' + esc(t("Motyw")) + '</h3></div><div class="panel-b">'
+  +   grupa("motyw", MOTYW, [["auto", t("Jak w systemie")], ["light", t("Jasny")], ["dark", t("Ciemny")]])
+  +   '<p class="tiny muted" style="margin-top:.7rem">' + esc(t("Ciemny motyw mniej razi w nocy, jasny lepiej czyta się w słońcu. Wydruk karty do portfela zostaje czarno na białym niezależnie od tego wyboru.")) + '</p>'
+  + '</div></div>'
+  + '</div>';
+
+  /* Nasłuch wisi na treści ekranu, nie na kontenerze: treść wymienia się przy każdym przerysowaniu,
+     więc nasłuchy się nie zbierają. */
+  document.getElementById("ustawienia").addEventListener("click", e => {
+    const b = e.target.closest("[data-wybor]");
+    if(!b) return;
+    const grupaNazwa = b.closest("[data-grupa]").dataset.grupa;
+    if(grupaNazwa === "motyw"){
+      ustawMotyw(b.dataset.wybor);
+      renderSettings();
+      return;
+    }
+    /* Zmiana języka przerysowuje ekran sama — REPAINT wskazuje na ten ekran. */
+    ustawJezyk(b.dataset.wybor);
+  });
+  REPAINT = renderSettings;
 }
 
 /* ---------------- router ---------------- */
 async function route(){
   nfcStop();
+  /* Domyślnie zmiana języka przerysowuje ekran przez tę samą trasę; ekrany zapisujące odczyt
+     podstawiają za siebie własne przerysowanie. */
+  REPAINT = route;
   const raw = (location.hash || "#/").slice(1);
   const qi = raw.indexOf("?");
   const path = qi < 0 ? raw : raw.slice(0, qi);
@@ -1935,23 +2302,434 @@ async function route(){
   if(path === "/karta") return renderCardView();
   if(path === "/odczyt") return renderScan(params);
   if(path === "/lekarz") return renderDoctorView();
+  if(path === "/ustawienia") return renderSettings();
   /* Trasa spod adresu zapisanego w opasce: #/t/<identyfikator>. */
   if(path.indexOf("/t/") === 0) return renderTagLanding(decodeURIComponent(path.slice(3)).trim().toUpperCase(), params);
   return renderStart();
 }
+
+/** Napisy w szkielecie strony: pasek górny i stopka stoją poza widokami, więc odświeżamy je osobno. */
+function paintShell(){
+  document.documentElement.lang = LANG;
+  document.querySelectorAll("[data-t]").forEach(el => { el.textContent = t(el.dataset.t); });
+  document.querySelectorAll("[data-t-title]").forEach(el => { el.title = t(el.dataset.tTitle); });
+  document.querySelectorAll("[data-t-aria]").forEach(el => { el.setAttribute("aria-label", t(el.dataset.tAria)); });
+  document.querySelectorAll("#lang button").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.lang === LANG)));
+  modeChip.textContent = API ? t("serwer HERO") : t("dane w tej przeglądarce");
+  modeChip.dataset.on = API ? "api" : "local";
+  modeChip.title = API ? t("Karty zapisywane w bazie serwera HERO") : t("Karty zapisywane w pamięci tej przeglądarki (localStorage)");
+}
+
+/* Przełącznik w pasku ustawia język wprost — kto go dotknie, chce konkretnego, nie „jak w telefonie".
+   Pełny wybór, razem z powrotem do ustawienia telefonu, jest na ekranie ustawień. */
+document.getElementById("lang").addEventListener("click", e => {
+  const b = e.target.closest("[data-lang]");
+  if(!b || b.dataset.lang === LANG) return;
+  ustawJezyk(b.dataset.lang);
+});
 
 async function boot(){
   try {
     const r = await fetch("api/health", {cache:"no-store"});
     if(r.ok){ const j = await r.json(); API = !!(j && j.service === "hero"); }
   } catch(e){ API = false; }
-  modeChip.textContent = API ? "serwer HERO" : "dane w tej przeglądarce";
-  modeChip.dataset.on = API ? "api" : "local";
-  modeChip.title = API ? "Karty zapisywane w bazie serwera HERO" : "Karty zapisywane w pamięci tej przeglądarki (localStorage)";
+  malujMotyw();
+  paintShell();
   if(!API) await ensureExample();
   window.addEventListener("hashchange", route);
   route();
 }
+/* ---------------- słownik angielski ---------------- */
+/**
+ * Kluczem jest dokładny napis polski z kodu wyżej, razem z markupem, jeśli literał go niesie.
+ * Napis bez wpisu w tym słowniku zostaje po polsku — to celowe: pół zdania po angielsku i pół po
+ * polsku byłoby gorsze od całości po polsku. `test/i18n.test.js` pilnuje, żeby każdy napis objęty
+ * `t()` miał tu odpowiednik i żeby oba miały ten sam szkielet znaczników.
+ */
+const EN = {
+  "odczyt po zbliżeniu breloka": "read after tapping the keyring",
+  "odczyt po zbliżeniu karty": "read after tapping the wallet card",
+  "odczyt po zbliżeniu opaski": "read after tapping the band",
+  "Przyłóż brelok do telefonu i przytrzymaj chwilę…": "Hold the keyring against the phone for a moment…",
+  "Przyłóż kartę do telefonu i przytrzymaj chwilę…": "Hold the wallet card against the phone for a moment…",
+  "Przyłóż opaskę do telefonu i przytrzymaj chwilę…": "Hold the band against the phone for a moment…",
+  "{0}, ratownik medyczny nr {1}": "{0}, paramedic reg. no. {1}",
+  "{0}, PWZ {1}": "{0}, PWZ no. {1}",
+  "Anafilaksja: {0}": "Anaphylaxis: {0}",
+  "Antykoagulant: {0}": "Anticoagulant: {0}",
+  "Wszczep / urządzenie": "Implant / device",
+  "DNR — zgłoszone oświadczenie": "DNR — declaration on file",
+  "Dawca narządów": "Organ donor",
+  "HERO — karta ratunkowa MediTag {0}": "HERO — MediTag emergency card {0}",
+  "Zakres: zestaw ratunkowy — bez nazwiska, kontaktów i pełnej listy rozpoznań": "Scope: emergency set — no name, no contacts, no full list of diagnoses",
+  "Pacjent: {0}": "Patient: {0}",
+  "nieznany": "unknown",
+  ", {0} lat": ", age {0}",
+  ", grupa {0}": ", blood group {0}",
+  "Alergie: {0}": "Allergies: {0}",
+  "brak zgłoszonych": "none reported",
+  "Leki: {0}": "Medication: {0}",
+  "ANTYKOAGULANT": "ANTICOAGULANT",
+  "Choroby: {0}": "Conditions: {0}",
+  "Wszczepy/urządzenia: {0}": "Implants/devices: {0}",
+  "UWAGA: zgłoszone oświadczenie DNR": "WARNING: DNR declaration on file",
+  "Kontakt: {0} ({1}) {2}": "Contact: {0} ({1}) {2}",
+  "Serwer odrzucił zapis (": "The server rejected the save (",
+  "Serwer odrzucił zmianę PIN-u (": "The server rejected the PIN change (",
+  "Nie ma karty o tym identyfikatorze": "There is no card with this identifier",
+  "Serwer odrzucił unieważnienie (": "The server rejected the revocation (",
+  "Serwer odrzucił nowy nośnik (": "The server rejected the new carrier (",
+  "Ten identyfikator jest już zajęty": "This identifier is already taken",
+  "Ta karta nie ma takiego nośnika": "This card has no such carrier",
+  "Numer PWZ składa się z siedmiu cyfr": "A PWZ number is seven digits",
+  "Numer ratownika ma od 4 do 20 znaków": "A paramedic number is 4 to 20 characters",
+  "Podaj imię i nazwisko": "Enter your full name",
+  "Hasło musi mieć co najmniej 8 znaków": "The password needs at least 8 characters",
+  "Nie udało się założyć konta": "The account could not be created",
+  "Konto z tym numerem już istnieje": "An account with this number already exists",
+  "Nieprawidłowy numer albo hasło": "Wrong number or password",
+  "Kod QR z adresem karty": "QR code with the card address",
+  "Przeglądarka nie dostała zgody na NFC. Zezwól na dostęp i spróbuj ponownie.": "The browser was not given NFC permission. Allow access and try again.",
+  "To urządzenie nie udostępnia NFC albo moduł jest wyłączony w ustawieniach.": "This device has no NFC, or the module is switched off in settings.",
+  "Nie udało się sięgnąć do opaski. Sprawdź, czy NFC jest włączone.": "Could not reach the carrier. Check whether NFC is on.",
+  "Opaska odsunęła się w trakcie. Przyłóż ją ponownie i przytrzymaj chwilę.": "The carrier moved away mid-write. Hold it against the phone again for a moment.",
+  "Nie udało się porozumieć z opaską.": "Could not talk to the carrier.",
+  "Anna Wiśniewska": "Anna Wiśniewska",
+  "Stymulator serca Medtronic, wszczepiony 2021 — nie stosować diatermii jednobiegunowej": "Medtronic pacemaker, implanted 2021 — do not use monopolar diathermy",
+  "Trudny dostęp dożylny — preferowana prawa kończyna górna.": "Difficult IV access — right upper limb preferred.",
+  "Obrzęk krtani, spadek ciśnienia": "Laryngeal oedema, drop in blood pressure",
+  "Wstrząs anafilaktyczny": "Anaphylactic shock",
+  "Nosi adrenalinę w ampułko-strzykawce": "Carries an adrenaline auto-injector",
+  "Pokrzywka, duszność": "Urticaria, shortness of breath",
+  "Migotanie przedsionków": "Atrial fibrillation",
+  "rano na czczo": "in the morning, on an empty stomach",
+  "Niedoczynność tarczycy": "Hypothyroidism",
+  "Marek Wiśniewski": "Marek Wiśniewski",
+  "mąż": "husband",
+  "lekarz prowadzący, kardiolog": "attending physician, cardiologist",
+  "Wpis podpisany kontem lekarza": "Entry signed with a doctor account",
+  "PWZ {0}": "PWZ {0}",
+  "<div class=\"acts\"><button class=\"btn btn-ghost btn-sm\" data-act=\"edit\">Edytuj</button><button class=\"btn btn-ghost btn-sm\" data-act=\"del\">Usuń</button></div></div>": "<div class=\"acts\"><button class=\"btn btn-ghost btn-sm\" data-act=\"edit\">Edit</button><button class=\"btn btn-ghost btn-sm\" data-act=\"del\">Delete</button></div></div>",
+  "dawkowanie nieokreślone": "dosage not given",
+  " · od ": " · since ",
+  "<h1>Karta pacjenta, którą ratownik otwiera <em>jednym zbliżeniem</em>.</h1>": "<h1>A patient card the paramedic opens <em>with one tap</em>.</h1>",
+  "<p class=\"lead\">MediTag to wodoodporna opaska NFC — a dla tych, którzy opaski nie założą, brelok do kluczy z tym samym układem. HERO to platforma, w której pacjent i lekarz prowadzą jedną kartę: alergie, przyjmowane leki, choroby przewlekłe, grupę krwi i kontakty alarmowe. Odczyt ratunkowy działa bez logowania — także wtedy, gdy pacjent jest nieprzytomny.</p>": "<p class=\"lead\">MediTag is a waterproof NFC band — and, for those who will not wear one, a key fob with the same chip inside. HERO is the platform where patient and doctor keep one card: allergies, medication, chronic conditions, blood group and emergency contacts. The emergency read-out works without logging in — including when the patient is unconscious.</p>",
+  "<div class=\"cta\"><a class=\"btn btn-primary\" href=\"#/karta\">Załóż kartę</a><a class=\"btn\" href=\"#/odczyt\">Wykonaj odczyt ratunkowy</a></div>": "<div class=\"cta\"><a class=\"btn btn-primary\" href=\"#/karta\">Create a card</a><a class=\"btn\" href=\"#/odczyt\">Run an emergency read-out</a></div>",
+  "<div><b>Bez logowania</b><span class=\"tiny muted\">odczyt ratunkowy nie wymaga konta</span></div>": "<div><b>No login</b><span class=\"tiny muted\">the emergency read-out needs no account</span></div>",
+  "<div><b>Bez aplikacji</b><span class=\"tiny muted\">telefon z NFC otwiera stronę karty</span></div>": "<div><b>No app</b><span class=\"tiny muted\">an NFC phone opens the card page</span></div>",
+  "<div><b>Z audytem</b><span class=\"tiny muted\">każdy odczyt trafia do historii karty</span></div>": "<div><b>With an audit trail</b><span class=\"tiny muted\">every read-out goes into the card history</span></div>",
+  "<div class=\"band\" aria-label=\"Podgląd karty na opasce\">": "<div class=\"band\" aria-label=\"Card preview on the band\">",
+  "<div class=\"band-top\"><svg width=\"16\" height=\"16\" aria-hidden=\"true\"><use href=\"#i-nfc\"></use></svg>Karta ratunkowa</div>": "<div class=\"band-top\"><svg width=\"16\" height=\"16\" aria-hidden=\"true\"><use href=\"#i-nfc\"></use></svg>Emergency card</div>",
+  "<div class=\"band-row\"><span>Grupa krwi</span><span>A RhD+</span></div>": "<div class=\"band-row\"><span>Blood group</span><span>A RhD+</span></div>",
+  "<div class=\"band-row\"><span>Alergie</span><span style=\"color:var(--crit)\">Penicylina — anafilaksja</span></div>": "<div class=\"band-row\"><span>Allergies</span><span style=\"color:var(--crit)\">Penicillin — anaphylaxis</span></div>",
+  "<div class=\"band-row\"><span>Leki</span><span>Rywaroksaban 20 mg <span class=\"tag tag-crit\">antykoagulant</span></span></div>": "<div class=\"band-row\"><span>Medication</span><span>Rivaroxaban 20 mg <span class=\"tag tag-crit\">anticoagulant</span></span></div>",
+  "<div class=\"band-row\"><span>Choroby</span><span>Migotanie przedsionków (I48)</span></div>": "<div class=\"band-row\"><span>Conditions</span><span>Atrial fibrillation (I48)</span></div>",
+  "<div class=\"nfc\"><span class=\"logo logo-meditag\" role=\"img\" aria-label=\"MediTag\"></span><span style=\"display:flex;align-items:center;gap:.4rem\"><svg width=\"13\" height=\"13\" aria-hidden=\"true\"><use href=\"#i-nfc\"></use></svg>Zbliż telefon do opaski</span></div>": "<div class=\"nfc\"><span class=\"logo logo-meditag\" role=\"img\" aria-label=\"MediTag\"></span><span style=\"display:flex;align-items:center;gap:.4rem\"><svg width=\"13\" height=\"13\" aria-hidden=\"true\"><use href=\"#i-nfc\"></use></svg>Tap your phone on the band</span></div>",
+  "<div class=\"step\"><span class=\"n\">1</span><div><h3>Pacjent prowadzi kartę</h3><p class=\"small muted\">Sam albo razem z lekarzem wpisuje alergie, leki i choroby. Wpis lekarza niesie jego nazwisko i numer PWZ.</p></div></div>": "<div class=\"step\"><span class=\"n\">1</span><div><h3>The patient keeps the card</h3><p class=\"small muted\">Alone or together with a doctor, they enter allergies, medication and conditions. A doctor's entry carries their name and licence number.</p></div></div>",
+  "<div class=\"step\"><span class=\"n\">2</span><div><h3>Nośnik niesie identyfikator</h3><p class=\"small muted\">Kartę zapisujesz na opasce albo na breloku do kluczy jednym zbliżeniem — zakładka „Nośniki”. W pamięci nośnika zostaje sam adres karty, bez danych medycznych.</p></div></div>": "<div class=\"step\"><span class=\"n\">2</span><div><h3>The carrier holds the identifier</h3><p class=\"small muted\">You write the card onto a band or a key fob with one tap — the „Carriers” tab. All the carrier stores is the card address, no medical data.</p></div></div>",
+  "<div class=\"step\"><span class=\"n\">3</span><div><h3>Zbliżenie otwiera kartę</h3><p class=\"small muted\">Zakres zależy od tego, kto zbliżył telefon: bez konta widać sam zestaw ratunkowy, konto lekarza albo ratownika otwiera kartę w całości, pacjent wchodzi do niej PIN-em. Każdy odczyt jest logowany.</p></div></div>": "<div class=\"step\"><span class=\"n\">3</span><div><h3>A tap opens the card</h3><p class=\"small muted\">The scope depends on who tapped: without an account only the emergency set shows, a doctor or paramedic account opens the whole card, the patient enters with a PIN. Every read-out is logged.</p></div></div>",
+  "<section style=\"margin-top:2.6rem\"><h2>Wejdź jako</h2><p class=\"muted small\" style=\"margin:.3rem 0 1rem\">Trzy wejścia, trzy różne zakresy dostępu do tej samej karty.</p>": "<section style=\"margin-top:2.6rem\"><h2>Enter as</h2><p class=\"muted small\" style=\"margin:.3rem 0 1rem\">Three ways in, three different levels of access to the same card.</p>",
+  "<a class=\"role\" href=\"#/karta\"><h3>Pacjent</h3><p>Zakładasz kartę, ustawiasz PIN i decydujesz, co widzi ratownik. Możesz kartę usunąć w każdej chwili.</p><div class=\"go\">Moja karta →</div></a>": "<a class=\"role\" href=\"#/karta\"><h3>Patient</h3><p>You create the card, set the PIN and decide what a paramedic sees. You can delete the card at any time.</p><div class=\"go\">My card →</div></a>",
+  "<a class=\"role\" href=\"#/lekarz\"><h3>Lekarz i ratownik medyczny</h3><p>Konto zawodowe otwiera kartę w całości: nazwisko, kontakty alarmowe, pełną listę rozpoznań. Lekarz dopisuje rozpoznania, leki i alergie — każdy wpis niesie jego nazwisko i numer.</p><div class=\"go\">Konto zawodowe →</div></a>": "<a class=\"role\" href=\"#/lekarz\"><h3>Doctor and paramedic</h3><p>A professional account opens the whole card: name, emergency contacts, the full list of diagnoses. A doctor adds diagnoses, medication and allergies — every entry carries their name and number.</p><div class=\"go\">Professional account →</div></a>",
+  "<a class=\"role crit\" href=\"#/odczyt\"><h3>Bez konta</h3><p>Sam identyfikator z nośnika, bez hasła. Zestaw ratunkowy: grupa krwi, alergie, antykoagulanty, wszczepy, DNR — bez nazwiska i kontaktów.</p><div class=\"go\">Odczyt ratunkowy →</div></a>": "<a class=\"role crit\" href=\"#/odczyt\"><h3>No account</h3><p>The identifier from the carrier, no password. The emergency set: blood group, allergies, anticoagulants, implants, DNR — without name or contacts.</p><div class=\"go\">Emergency read-out →</div></a>",
+  "<section style=\"margin-top:2.6rem\"><h2>Karty zapisane tutaj</h2>": "<section style=\"margin-top:2.6rem\"><h2>Cards stored here</h2>",
+  "<div class=\"scrollx\"><table><thead><tr><th>Identyfikator</th><th>Pacjent</th><th>Ostatnia zmiana</th><th></th></tr></thead><tbody>": "<div class=\"scrollx\"><table><thead><tr><th>Identifier</th><th>Patient</th><th>Last change</th><th></th></tr></thead><tbody>",
+  " <span class=\"tag\">przykład</span>": " <span class=\"tag\">example</span>",
+  "\">Jak po zbliżeniu</a> <a class=\"btn btn-sm\" href=\"#/odczyt?tag=": "\">As after a tap</a> <a class=\"btn btn-sm\" href=\"#/odczyt?tag=",
+  "<div class=\"empty\">Nie ma jeszcze żadnej karty. Zacznij od „Załóż kartę”.</div>": "<div class=\"empty\">No card here yet. Start with „Create a card”.</div>",
+  "Odczyt ratunkowy · HERO": "Emergency read-out · HERO",
+  "Zestaw ratunkowy": "Emergency set",
+  "Pacjent nieznany": "Patient unknown",
+  "{0} lat": "age {0}",
+  "grupa krwi": "blood group",
+  "Alergie i nadwrażliwości": "Allergies and hypersensitivities",
+  "Nie zgłoszono żadnej alergii.": "No allergy reported.",
+  "Przyjmowane leki": "Medication taken",
+  "Nie zgłoszono leków.": "No medication reported.",
+  "Choroby przewlekłe": "Chronic conditions",
+  "Nie zgłoszono chorób przewlekłych.": "No chronic condition reported.",
+  "Uwagi istotne dla zespołu": "Notes that matter to the team",
+  "Kontakty alarmowe": "Emergency contacts",
+  "Nazwisko pacjenta i kontakty alarmowe otwiera konto lekarza albo ratownika. Bez konta zostaje to, co ratuje życie.": "The patient's name and emergency contacts open with a doctor or paramedic account. Without an account, what stays is what saves a life.",
+  "pierwszy": "first",
+  "Brak kontaktów alarmowych.": "No emergency contacts.",
+  "Karta": "Card",
+  "aktualizacja {0} ({1})": "updated {0} ({1})",
+  "Odczyt zapisany: {0} · {1}": "Read-out logged: {0} · {1}",
+  "reakcja nieopisana": "reaction not described",
+  "antykoagulant": "anticoagulant",
+  "Nośnik unieważniony": "Carrier revoked",
+  ". Pacjent zgłosił jego utratę, więc pod tym identyfikatorem nie ma karty. Jeśli pacjent jest przytomny, poproś o inny nośnik; jeśli nie — szukaj drugiej opaski, breloka albo dokumentów. Identyfikator: ": ". The patient reported it lost, so there is no card under this identifier. If the patient is conscious, ask for another carrier; if not — look for a second band, a key fob or documents. Identifier: ",
+  "Podsumowanie skopiowane": "Summary copied",
+  "Przeglądarka zablokowała schowek": "The browser blocked the clipboard",
+  "Konto zawodowe: ": "Professional account: ",
+  "<p class=\"muted\" style=\"margin-top:.5rem\">W realnym urządzeniu ten ekran otwiera się po zbliżeniu telefonu do opaski albo breloka. Tutaj wpisz identyfikator ręcznie. ": "<p class=\"muted\" style=\"margin-top:.5rem\">On a real device this screen opens after tapping the phone on a band or a key fob. Here, type the identifier by hand. ",
+  "Twoje konto otwiera kartę w całości.": "Your account opens the whole card.",
+  "<label class=\"f\" style=\"flex:2 1 220px\">Identyfikator z nośnika<input class=\"mono\" name=\"tag\" placeholder=\"z opaski, breloka albo karty\" value=\"": "<label class=\"f\" style=\"flex:2 1 220px\">Identifier from the carrier<input class=\"mono\" name=\"tag\" placeholder=\"from a band, key fob or wallet card\" value=\"",
+  "<button class=\"btn btn-crit\" type=\"submit\">Odczytaj kartę</button>": "<button class=\"btn btn-crit\" type=\"submit\">Read the card</button>",
+  "<button class=\"btn\" type=\"button\" id=\"scanNfc\">Odczytaj z nośnika</button>": "<button class=\"btn\" type=\"button\" id=\"scanNfc\">Read from a carrier</button>",
+  "</form><p class=\"tiny muted\" style=\"margin-top:.6rem\">Odczyt nie wymaga PIN-u i zostaje zapisany w historii karty — ": "</form><p class=\"tiny muted\" style=\"margin-top:.6rem\">The read-out needs no PIN and is logged in the card history — ",
+  "pod nazwiskiem i numerem z twojego konta.": "under the name and number from your account.",
+  "wraz z podanym opisem czytnika.": "together with the reader description you gave.",
+  "<div class=\"notice\"><span>To zestaw ratunkowy: bez nazwiska pacjenta i bez kontaktów alarmowych. Kartę w całości otwiera konto lekarza albo ratownika medycznego.</span></div>": "<div class=\"notice\"><span>This is the emergency set: no patient name and no emergency contacts. The whole card opens with a doctor or paramedic account.</span></div>",
+  "<div class=\"row\" style=\"margin-top:.8rem\"><button class=\"btn btn-sm\" id=\"copyHand\">Skopiuj podsumowanie do przekazania</button>": "<div class=\"row\" style=\"margin-top:.8rem\"><button class=\"btn btn-sm\" id=\"copyHand\">Copy handover summary</button>",
+  "<a class=\"btn btn-sm btn-primary\" href=\"#/lekarz\">Otwórz kartę kontem zawodowym</a>": "<a class=\"btn btn-sm btn-primary\" href=\"#/lekarz\">Open the card with a professional account</a>",
+  "<div class=\"notice\"><span>Przyłóż nośnik do telefonu…</span></div>": "<div class=\"notice\"><span>Hold the carrier against the phone…</span></div>",
+  "<div class=\"notice warn\"><span>Nie ma tam adresu karty HERO.</span></div>": "<div class=\"notice warn\"><span>No HERO card address in there.</span></div>",
+  "<div class=\"notice crit\"><span>Nie znaleziono karty <b class=\"tagid\">": "<div class=\"notice crit\"><span>No card found for <b class=\"tagid\">",
+  "</b>. Sprawdź identyfikator albo załóż kartę w zakładce „Moja karta”.</span></div>": "</b>. Check the identifier, or create a card in the „My card” tab.</span></div>",
+  "Rola: lekarz — ": "Role: doctor — ",
+  "Rola: pacjent": "Role: patient",
+  "Karta bez nazwiska": "Card without a name",
+  " <span class=\"tag tag-crit\">karta odcięta</span>": " <span class=\"tag tag-crit\">card cut off</span>",
+  "\">Podgląd odczytu</a>": "\">Read-out preview</a>",
+  "<button class=\"btn btn-sm\" id=\"delCard\">Usuń kartę</button>": "<button class=\"btn btn-sm\" id=\"delCard\">Delete the card</button>",
+  "Usunąć kartę ": "Delete card ",
+  " wraz z historią odczytów? Operacji nie da się cofnąć.": " together with its read history? This cannot be undone.",
+  "Karta usunięta": "Card deleted",
+  "<label class=\"f\">Imię i nazwisko<input name=\"name\" value=\"": "<label class=\"f\">Full name<input name=\"name\" value=\"",
+  "<label class=\"f\">Grupa krwi<select name=\"blood\"><option value=\"\">—</option>": "<label class=\"f\">Blood group<select name=\"blood\"><option value=\"\">—</option>",
+  "<label class=\"f\">Masa ciała (kg)<input name=\"weightKg\" inputmode=\"numeric\" value=\"": "<label class=\"f\">Body weight (kg)<input name=\"weightKg\" inputmode=\"numeric\" value=\"",
+  "<label class=\"f\">Języki kontaktu<input name=\"langs\" value=\"": "<label class=\"f\">Languages<input name=\"langs\" value=\"",
+  "<label class=\"f\">Wszczepy i urządzenia<textarea name=\"devices\" placeholder=\"np. stymulator serca, pompa insulinowa, zastawka mechaniczna\">": "<label class=\"f\">Implants and devices<textarea name=\"devices\" placeholder=\"e.g. pacemaker, insulin pump, mechanical valve\">",
+  "<label class=\"f\">Uwagi dla zespołu ratunkowego<textarea name=\"note\" placeholder=\"np. trudny dostęp dożylny, niepełnosprawność, opieka nad dzieckiem\">": "<label class=\"f\">Notes for the emergency team<textarea name=\"note\" placeholder=\"e.g. difficult IV access, disability, caring for a child\">",
+  "> Zgoda na pobranie narządów</label>": "> Consent to organ donation</label>",
+  "> Zgłoszone oświadczenie DNR</label></div>": "> DNR declaration on file</label></div>",
+  "<div class=\"row\"><button class=\"btn btn-primary\" type=\"submit\">Zapisz dane podstawowe</button></div></form>": "<div class=\"row\"><button class=\"btn btn-primary\" type=\"submit\">Save basic data</button></div></form>",
+  "<details style=\"margin-top:1.2rem\"><summary class=\"small muted\" style=\"cursor:pointer\">Zmiana PIN-u</summary>": "<details style=\"margin-top:1.2rem\"><summary class=\"small muted\" style=\"cursor:pointer\">Change the PIN</summary>",
+  "<p class=\"small muted\" style=\"margin:.6rem 0\">PIN otwiera kartę do edycji — jeśli ktoś go poznał, zmień go tutaj. Karta, historia odczytów i nośniki zostają bez zmian, bo PIN-u nie ma w żadnym z nich.</p>": "<p class=\"small muted\" style=\"margin:.6rem 0\">The PIN opens the card for editing — if someone learned it, change it here. The card, the read history and the carriers stay as they are, because the PIN is in none of them.</p>",
+  "<label class=\"f\">Obecny PIN<input type=\"password\" name=\"stary\" inputmode=\"numeric\" required></label>": "<label class=\"f\">Current PIN<input type=\"password\" name=\"stary\" inputmode=\"numeric\" required></label>",
+  "<label class=\"f\">Nowy PIN<input type=\"password\" name=\"nowy\" inputmode=\"numeric\" minlength=\"4\" maxlength=\"6\" required placeholder=\"4–6 cyfr\"></label>": "<label class=\"f\">New PIN<input type=\"password\" name=\"nowy\" inputmode=\"numeric\" minlength=\"4\" maxlength=\"6\" required placeholder=\"4–6 digits\"></label>",
+  "<label class=\"f\">Powtórz nowy PIN<input type=\"password\" name=\"nowy2\" inputmode=\"numeric\" required></label>": "<label class=\"f\">Repeat the new PIN<input type=\"password\" name=\"nowy2\" inputmode=\"numeric\" required></label>",
+  "<button class=\"btn btn-primary btn-sm\" type=\"submit\">Zmień PIN</button>": "<button class=\"btn btn-primary btn-sm\" type=\"submit\">Change the PIN</button>",
+  "Nowe PIN-y się różnią.": "The new PINs differ.",
+  "Obecny PIN się nie zgadza.": "The current PIN does not match.",
+  "Nowy PIN jest taki sam jak stary.": "The new PIN is the same as the old one.",
+  "PIN zmieniony": "PIN changed",
+  "<span class=\"tag tag-crit\" style=\"margin-left:auto\">unieważniony ": "<span class=\"tag tag-crit\" style=\"margin-left:auto\">revoked ",
+  "<p class=\"small muted\">Pod tym identyfikatorem nikt już nie odczyta karty. Nośnik zostaje na liście jako nagrobek: ratownik, który go zbliży, ma zobaczyć „unieważniony\", a nie „nie ma takiej karty\".</p>": "<p class=\"small muted\">Nobody will read the card under this identifier any more. The carrier stays on the list as a headstone: a paramedic who taps it should see „revoked”, not „no such card”.</p>",
+  "Kod QR z adresem karty ": "QR code with the address of card ",
+  "<div><label class=\"f\">Adres zapisywany w nośniku<input class=\"mono\" data-url readonly value=\"": "<div><label class=\"f\">Address written to the carrier<input class=\"mono\" data-url readonly value=\"",
+  "<p class=\"tiny muted\" style=\"margin-top:.5rem\">Kod QR niesie ten sam adres. Działa tam, gdzie NFC nie: na telefonie bez czytnika, na iOS i po wydrukowaniu.</p></div>": "<p class=\"tiny muted\" style=\"margin-top:.5rem\">The QR code carries the same address. It works where NFC does not: on a phone without a reader, on iOS, and on paper.</p></div>",
+  ">Zapisz na tym nośniku</button>": ">Write to this carrier</button>",
+  ">Sprawdź, co jest w nośniku</button>": ">Check what is on the carrier</button>",
+  "<button class=\"btn btn-crit btn-sm\" data-act=\"zgas\">Zgubiony — unieważnij</button>": "<button class=\"btn btn-crit btn-sm\" data-act=\"zgas\">Lost — revoke</button>",
+  "<div class=\"notice crit\"><span>Ta karta jest odcięta od ": "<div class=\"notice crit\"><span>This card has been cut off since ",
+  ". Żaden nośnik nie oddaje jej już do odczytu — ani ratownikowi, ani tobie. Treść karty zostaje i otwiera ją PIN.</span></div>": ". No carrier gives it out for reading any more — not to a paramedic, not to you. The card content stays and the PIN opens it.</span></div>",
+  "<p class=\"small muted\">Nośnik niesie sam adres tej karty, bez danych medycznych. Kto go zbliży, otworzy ten adres: bez konta zobaczy zestaw ratunkowy, konto lekarza albo ratownika otworzy kartę w całości, a ty wejdziesz do niej PIN-em. Jedną kartę można nosić na kilku rzeczach naraz — opaska na ręku, brelok przy kluczach, karta w portfelu.</p>": "<p class=\"small muted\">A carrier holds only the address of this card, no medical data. Whoever taps it opens that address: without an account they see the emergency set, a doctor or paramedic account opens the whole card, and you enter with your PIN. One card can travel on several things at once — a band on the wrist, a key fob, a card in the wallet.</p>",
+  "<div class=\"panel\"><div class=\"panel-h\"><h3>Dodaj nośnik</h3></div><div class=\"panel-b\">": "<div class=\"panel\"><div class=\"panel-h\"><h3>Add a carrier</h3></div><div class=\"panel-b\">",
+  "<label class=\"f\" style=\"flex:2 1 220px\">Opis dla ciebie<input name=\"label\" maxlength=\"60\" placeholder=\"brelok do kluczy\"></label>": "<label class=\"f\" style=\"flex:2 1 220px\">Your own label<input name=\"label\" maxlength=\"60\" placeholder=\"key fob\"></label>",
+  "<button class=\"btn btn-primary\" type=\"submit\">Dodaj nośnik</button>": "<button class=\"btn btn-primary\" type=\"submit\">Add a carrier</button>",
+  "<p class=\"tiny muted\" style=\"margin-top:.6rem\">Nowy nośnik dostaje własny identyfikator i prowadzi do tej samej karty. PIN zostaje ten sam, bo wiąże się z kartą, nie z nośnikiem. Zgubiony nośnik unieważnia się osobno — pozostałe działają dalej.</p>": "<p class=\"tiny muted\" style=\"margin-top:.6rem\">A new carrier gets its own identifier and leads to the same card. The PIN stays the same, because it belongs to the card, not to the carrier. A lost carrier is revoked on its own — the rest keep working.</p>",
+  "<div class=\"notice warn\"><span>Ta przeglądarka nie udostępnia Web NFC — zapis działa dziś w Chrome na Androidzie, na stronie otwartej przez HTTPS. Na innym sprzęcie zapisz adres nośnika dowolną aplikacją do NFC, jako rekord typu URL.</span></div>": "<div class=\"notice warn\"><span>This browser does not offer Web NFC — writing works today in Chrome on Android, on a page served over HTTPS. On other hardware, write the carrier address with any NFC app, as a URL record.</span></div>",
+  "<div class=\"notice warn\"><span>Strona jest otwarta z pliku, więc adres nie ma nazwy serwera i telefon ratownika go nie otworzy. Uruchom aplikację przez <span class=\"mono\">npm start</span> albo wystaw ją pod adresem HTTPS.</span></div>": "<div class=\"notice warn\"><span>The page is open from a file, so the address has no server name and a paramedic's phone will not open it. Run the app with <span class=\"mono\">npm start</span> or publish it under an HTTPS address.</span></div>",
+  "<div class=\"notice\"><span>Karta leży w pamięci tej przeglądarki, nie na serwerze. Nośnik zaprowadzi pod ten adres każdy telefon, ale kartę znajdzie pod nim tylko ta przeglądarka. Nośnik, który ma zadziałać u ratownika, wymaga serwera HERO.</span></div>": "<div class=\"notice\"><span>The card lives in this browser, not on a server. A carrier will lead every phone to this address, but only this browser will find the card there. A carrier that has to work for a paramedic needs the HERO server.</span></div>",
+  "<div class=\"row\"><button class=\"btn btn-sm\" id=\"doWydruku\">Wydrukuj kartę do portfela</button></div>": "<div class=\"row\"><button class=\"btn btn-sm\" id=\"doWydruku\">Print a wallet card</button></div>",
+  "<details><summary class=\"small muted\" style=\"cursor:pointer\">Nośnik zapisany na stałe</summary>": "<details><summary class=\"small muted\" style=\"cursor:pointer\">Carrier written permanently</summary>",
+  "<p class=\"small muted\" style=\"margin:.6rem 0\">Opaskę albo brelok można zablokować przed nadpisaniem. Operacji nie da się cofnąć: zablokowanego nośnika nie przypiszesz już do innej karty.</p>": "<p class=\"small muted\" style=\"margin:.6rem 0\">A band or a key fob can be locked against overwriting. This cannot be undone: a locked carrier can never be assigned to another card.</p>",
+  ">Zabezpiecz nośnik przed zapisem</button>": ">Lock the carrier against writing</button>",
+  "<details><summary class=\"small muted\" style=\"cursor:pointer\">Odetnij całą kartę</summary>": "<details><summary class=\"small muted\" style=\"cursor:pointer\">Cut off the whole card</summary>",
+  "<p class=\"small muted\" style=\"margin:.6rem 0\">Zgubiłeś jeden nośnik? Unieważnij właśnie jego — reszta działa dalej. Odcięcie całej karty gasi wszystkie nośniki naraz: pod żadnym identyfikatorem nikt jej nie odczyta, a operacji nie da się cofnąć. Treść karty i historia odczytów zostają, otwiera je PIN.</p>": "<p class=\"small muted\" style=\"margin:.6rem 0\">Lost one carrier? Revoke that one — the rest keep working. Cutting off the whole card puts out every carrier at once: nobody will read it under any identifier, and it cannot be undone. The card content and the read history stay, and the PIN opens them.</p>",
+  "<button class=\"btn btn-crit btn-sm\" id=\"revoke\">Odetnij całą kartę</button>": "<button class=\"btn btn-crit btn-sm\" id=\"revoke\">Cut off the whole card</button>",
+  "Adres skopiowany": "Address copied",
+  "Zapisane. Od teraz zbliżenie otwiera kartę ": "Written. From now on a tap opens card ",
+  "Nośnik zapisany": "Carrier written",
+  "Przyłóż nośnik do telefonu…": "Hold the carrier against the phone…",
+  "Nie ma tam adresu karty HERO. Zapis go przypisze.": "No HERO card address in there. Writing will assign one.",
+  "To ten nośnik: ": "This is the carrier: ",
+  "Tam jest inny adres: ": "There is a different address in there: ",
+  "Unieważnić nośnik ": "Revoke carrier ",
+  "? Pod tym identyfikatorem nikt już nie odczyta karty, a operacji nie da się cofnąć.": "? Nobody will read the card under this identifier any more, and it cannot be undone.",
+  "Zabezpieczyć nośnik przed zapisem? Adresu na nim nie da się już potem zmienić.": "Lock the carrier against writing? The address on it can never be changed afterwards.",
+  "Nośnik zabezpieczony — zapisanego adresu nie da się już zmienić.": "Carrier locked — the written address can no longer be changed.",
+  "{0} — nośnik dodany do karty": "{0} — carrier added to the card",
+  "Odciąć całą kartę ": "Cut off the whole card ",
+  "? Żaden nośnik nie odda jej już do odczytu, a operacji nie da się cofnąć.": "? No carrier will give it out for reading any more, and it cannot be undone.",
+  "Karta odcięta": "Card cut off",
+  "<div class=\"row\" style=\"justify-content:space-between;margin-bottom:.8rem\"><p class=\"small muted\" style=\"flex:1 1 260px\">Każde otwarcie karty w trybie ratunkowym zostawia ślad. Historia jest widoczna dla pacjenta i lekarza z dostępem.</p>": "<div class=\"row\" style=\"justify-content:space-between;margin-bottom:.8rem\"><p class=\"small muted\" style=\"flex:1 1 260px\">Every emergency opening of the card leaves a trace. The history is visible to the patient and to a doctor with access.</p>",
+  "<button class=\"btn btn-sm\" id=\"reloadReads\">Odśwież</button></div>": "<button class=\"btn btn-sm\" id=\"reloadReads\">Refresh</button></div>",
+  "<div class=\"empty\">Karta nie była jeszcze odczytywana.</div>": "<div class=\"empty\">The card has not been read yet.</div>",
+  "Dodaj alergię": "Add an allergy",
+  "\" placeholder=\"np. obrzęk krtani, pokrzywka\"></label>": "\" placeholder=\"e.g. laryngeal oedema, urticaria\"></label>",
+  "\" placeholder=\"np. potwierdzone testami, nosi adrenalinę\"></label>": "\" placeholder=\"e.g. confirmed by testing, carries adrenaline\"></label>",
+  "Dodaj lek": "Add a medicine",
+  "<label class=\"f\">Kod ATC<input class=\"mono\" name=\"atc\" value=\"": "<label class=\"f\">ATC code<input class=\"mono\" name=\"atc\" value=\"",
+  "<label class=\"f\">Częstość<input name=\"freq\" value=\"": "<label class=\"f\">Frequency<input name=\"freq\" value=\"",
+  "<label class=\"f\">Przyjmuje od<input name=\"since\" value=\"": "<label class=\"f\">Taking since<input name=\"since\" value=\"",
+  "> Lek przeciwkrzepliwy lub przeciwpłytkowy (wyróżniany w odczycie ratunkowym)</label>": "> Anticoagulant or antiplatelet drug (highlighted in the emergency read-out)</label>",
+  "Dodaj chorobę lub rozpoznanie": "Add a condition or diagnosis",
+  "\" placeholder=\"np. migotanie przedsionków\"></label>": "\" placeholder=\"e.g. atrial fibrillation\"></label>",
+  "<label class=\"f\">Kod ICD-10<input class=\"mono\" name=\"icd10\" value=\"": "<label class=\"f\">ICD-10 code<input class=\"mono\" name=\"icd10\" value=\"",
+  "Dodaj kontakt alarmowy": "Add an emergency contact",
+  "<label class=\"f\">Imię i nazwisko<input name=\"name\" required value=\"": "<label class=\"f\">Full name<input name=\"name\" required value=\"",
+  "\" placeholder=\"np. Marek Wiśniewski\"></label>": "\" placeholder=\"e.g. Marek Wiśniewski\"></label>",
+  "\" placeholder=\"mąż, córka, lekarz prowadzący\"></label>": "\" placeholder=\"husband, daughter, attending physician\"></label>",
+  "<div class=\"empty\">Brak wpisów w tej sekcji.</div>": "<div class=\"empty\">No entries in this section.</div>",
+  "Edytuj wpis": "Edit entry",
+  "Zapisz zmianę": "Save the change",
+  "Dodaj": "Add",
+  "<button class=\"btn\" type=\"button\" id=\"cancelEdit\">Anuluj</button>": "<button class=\"btn\" type=\"button\" id=\"cancelEdit\">Cancel</button>",
+  "Wpis usunięty": "Entry deleted",
+  "<div><p class=\"eyebrow\">Rola: pacjent</p><h1 style=\"font-size:2rem\">Moja karta</h1>": "<div><p class=\"eyebrow\">Role: patient</p><h1 style=\"font-size:2rem\">My card</h1>",
+  "<p class=\"muted\" style=\"margin-top:.5rem\">Identyfikator z nośnika i PIN otwierają kartę do edycji. Ratownikowi wystarczy sam identyfikator — PIN chroni edycję, nie odczyt ratunkowy.</p></div>": "<p class=\"muted\" style=\"margin-top:.5rem\">The identifier from a carrier and the PIN open the card for editing. A paramedic needs the identifier alone — the PIN protects editing, not the emergency read-out.</p></div>",
+  "<div class=\"panel\"><div class=\"panel-h\"><h3>Karty znane tej przeglądarce</h3>": "<div class=\"panel\"><div class=\"panel-h\"><h3>Cards known to this browser</h3>",
+  "<span class=\"tiny muted\" style=\"margin-left:auto\">otwierane tu PIN-em pacjenta</span></div>": "<span class=\"tiny muted\" style=\"margin-left:auto\">opened here with the patient PIN</span></div>",
+  "karta bez nazwiska": "card without a name",
+  "<div class=\"acts\"><button class=\"btn btn-sm\" data-act=\"open\">Otwórz</button>": "<div class=\"acts\"><button class=\"btn btn-sm\" data-act=\"open\">Open</button>",
+  "<p class=\"tiny muted\" style=\"margin-top:.7rem\">Lista leży w pamięci tej przeglądarki i nie dowodzi niczego — kartę otwiera PIN.</p>": "<p class=\"tiny muted\" style=\"margin-top:.7rem\">The list lives in this browser and proves nothing — the PIN opens the card.</p>",
+  "<div class=\"panel\"><div class=\"panel-h\"><h3>Otwórz istniejącą kartę</h3></div><div class=\"panel-b\"><form id=\"fOpen\" class=\"stack\">": "<div class=\"panel\"><div class=\"panel-h\"><h3>Open an existing card</h3></div><div class=\"panel-b\"><form id=\"fOpen\" class=\"stack\">",
+  "<label class=\"f\">Identyfikator z nośnika<input class=\"mono\" name=\"tag\" required placeholder=\"z opaski, breloka albo karty\"></label>": "<label class=\"f\">Identifier from the carrier<input class=\"mono\" name=\"tag\" required placeholder=\"from a band, key fob or wallet card\"></label>",
+  "<label class=\"f\">PIN<input type=\"password\" name=\"pin\" inputmode=\"numeric\" required placeholder=\"4–6 cyfr\"></label>": "<label class=\"f\">PIN<input type=\"password\" name=\"pin\" inputmode=\"numeric\" required placeholder=\"4–6 digits\"></label>",
+  "<button class=\"btn btn-primary\" type=\"submit\">Otwórz kartę</button><p id=\"openErr\" class=\"tiny\" style=\"color:var(--crit)\"></p></form></div></div>": "<button class=\"btn btn-primary\" type=\"submit\">Open the card</button><p id=\"openErr\" class=\"tiny\" style=\"color:var(--crit)\"></p></form></div></div>",
+  "<div class=\"panel\"><div class=\"panel-h\"><h3>Załóż nową kartę</h3></div><div class=\"panel-b\"><form id=\"fNew\" class=\"stack\">": "<div class=\"panel\"><div class=\"panel-h\"><h3>Create a new card</h3></div><div class=\"panel-b\"><form id=\"fNew\" class=\"stack\">",
+  "<label class=\"f\">Imię i nazwisko<input name=\"name\" required placeholder=\"Jan Kowalski\"></label>": "<label class=\"f\">Full name<input name=\"name\" required placeholder=\"Jan Kowalski\"></label>",
+  "<label class=\"f\">PIN do edycji<input type=\"password\" name=\"pin\" inputmode=\"numeric\" minlength=\"4\" maxlength=\"6\" required placeholder=\"4–6 cyfr\"></label>": "<label class=\"f\">PIN for editing<input type=\"password\" name=\"pin\" inputmode=\"numeric\" minlength=\"4\" maxlength=\"6\" required placeholder=\"4–6 digits\"></label>",
+  "<label class=\"f\">Powtórz PIN<input type=\"password\" name=\"pin2\" inputmode=\"numeric\" required></label>": "<label class=\"f\">Repeat the PIN<input type=\"password\" name=\"pin2\" inputmode=\"numeric\" required></label>",
+  "<p class=\"tiny muted\">Opaska trzyma się nadgarstka i nie gubi — dlatego trafia do osób starszych i do dzieci. Brelok wisi przy kluczach. Kolejne nośniki dołożysz w karcie; wszystkie prowadzą do tej samej treści.</p>": "<p class=\"tiny muted\">A band stays on the wrist and does not get lost — which is why it goes to older people and to children. A key fob hangs with the keys. You can add more carriers inside the card; all of them lead to the same content.</p>",
+  "<button class=\"btn btn-primary\" type=\"submit\">Utwórz kartę</button><p id=\"newErr\" class=\"tiny\" style=\"color:var(--crit)\"></p></form></div></div>": "<button class=\"btn btn-primary\" type=\"submit\">Create the card</button><p id=\"newErr\" class=\"tiny\" style=\"color:var(--crit)\"></p></form></div></div>",
+  "karta zapisuje się w bazie serwera HERO, a jej zestaw ratunkowy odczyta każdy, kto zna identyfikator z nośnika. Nie wprowadzaj danych, których nie chcesz tam zostawić.": "the card is stored in the HERO server database, and its emergency set can be read by anyone who knows the identifier from a carrier. Do not enter data you would not want to leave there.",
+  "dane tej karty zostają w pamięci tej przeglądarki i nie są wysyłane na serwer. Nie wprowadzaj danych, których nie chcesz tu zostawić.": "this card's data stays in this browser and is not sent to any server. Do not enter data you would not want to leave here.",
+  " Kartę można usunąć jednym przyciskiem.</span></div>": " The card can be deleted with one button.</span></div>",
+  "Nieprawidłowy PIN.": "Wrong PIN.",
+  "Nie ma karty o tym identyfikatorze.": "There is no card with this identifier.",
+  "PIN-y się różnią.": "The PINs differ.",
+  "Karta ": "Card ",
+  "<p class=\"tiny muted\">Zalogowanych urządzeń: ": "<p class=\"tiny muted\">Devices signed in: ",
+  "<button class=\"btn btn-sm\" id=\"docOut\">Wyloguj z konta</button>": "<button class=\"btn btn-sm\" id=\"docOut\">Sign out of the account</button>",
+  "<button class=\"btn btn-sm\" id=\"docOutAll\">Wyloguj wszędzie</button>": "<button class=\"btn btn-sm\" id=\"docOutAll\">Sign out everywhere</button>",
+  "Wylogować konto ze wszystkich urządzeń? Token sesji przestanie działać także tam, gdzie zostawiłeś go otwarty.": "Sign the account out of every device? The session token will stop working also where you left it open.",
+  "Konto wylogowane ze wszystkich urządzeń": "Account signed out of every device",
+  "<div><p class=\"eyebrow\">Konto zawodowe</p><h1 style=\"font-size:2rem\">Lekarz albo ratownik medyczny</h1>": "<div><p class=\"eyebrow\">Professional account</p><h1 style=\"font-size:2rem\">Doctor or paramedic</h1>",
+  "<p class=\"muted\" style=\"margin-top:.5rem\">Konto otwiera kartę w całości: nazwisko pacjenta, kontakty alarmowe i pełną listę rozpoznań. Bez konta zostaje sam zestaw ratunkowy — grupa krwi, alergie, antykoagulanty, wszczepy, DNR. Każde otwarcie karty kontem zapisuje się w jej historii, razem z nazwiskiem i numerem.</p></div>": "<p class=\"muted\" style=\"margin-top:.5rem\">An account opens the whole card: the patient's name, emergency contacts and the full list of diagnoses. Without an account only the emergency set is left — blood group, allergies, anticoagulants, implants, DNR. Every opening of a card with an account is written into its history, together with the name and number.</p></div>",
+  "<div class=\"panel\"><div class=\"panel-h\"><h3>Zaloguj się</h3></div><div class=\"panel-b\"><form id=\"fLogin\" class=\"stack\">": "<div class=\"panel\"><div class=\"panel-h\"><h3>Sign in</h3></div><div class=\"panel-b\"><form id=\"fLogin\" class=\"stack\">",
+  "<label class=\"f\">Numer PWZ albo numer ratownika<input class=\"mono\" name=\"pwz\" maxlength=\"20\" required placeholder=\"1234567\"></label>": "<label class=\"f\">PWZ number or paramedic number<input class=\"mono\" name=\"pwz\" maxlength=\"20\" required placeholder=\"1234567\"></label>",
+  "<label class=\"f\">Hasło<input type=\"password\" name=\"password\" required></label>": "<label class=\"f\">Password<input type=\"password\" name=\"password\" required></label>",
+  "<button class=\"btn btn-primary\" type=\"submit\">Zaloguj</button><p id=\"loginErr\" class=\"tiny\" style=\"color:var(--crit)\"></p>": "<button class=\"btn btn-primary\" type=\"submit\">Sign in</button><p id=\"loginErr\" class=\"tiny\" style=\"color:var(--crit)\"></p>",
+  "<div class=\"panel\"><div class=\"panel-h\"><h3>Załóż konto</h3></div><div class=\"panel-b\"><form id=\"fReg\" class=\"stack\">": "<div class=\"panel\"><div class=\"panel-h\"><h3>Create an account</h3></div><div class=\"panel-b\"><form id=\"fReg\" class=\"stack\">",
+  "<label class=\"f\">Zawód<select name=\"role\"><option value=\"lekarz\">Lekarz</option><option value=\"ratownik\">Ratownik medyczny</option></select></label>": "<label class=\"f\">Profession<select name=\"role\"><option value=\"lekarz\">Doctor</option><option value=\"ratownik\">Paramedic</option></select></label>",
+  "<label class=\"f\"><span id=\"regNrLbl\">Numer PWZ</span><input class=\"mono\" name=\"pwz\" id=\"regNr\" inputmode=\"numeric\" maxlength=\"7\" required placeholder=\"1234567\"></label>": "<label class=\"f\"><span id=\"regNrLbl\">PWZ number</span><input class=\"mono\" name=\"pwz\" id=\"regNr\" inputmode=\"numeric\" maxlength=\"7\" required placeholder=\"1234567\"></label>",
+  "<label class=\"f\">Imię i nazwisko<input name=\"name\" required placeholder=\"dr Tomasz Lewandowski\"></label>": "<label class=\"f\">Full name<input name=\"name\" required placeholder=\"dr Tomasz Lewandowski\"></label>",
+  "<label class=\"f\">Hasło<input type=\"password\" name=\"password\" minlength=\"8\" required placeholder=\"co najmniej 8 znaków\"></label>": "<label class=\"f\">Password<input type=\"password\" name=\"password\" minlength=\"8\" required placeholder=\"at least 8 characters\"></label>",
+  "<button class=\"btn btn-primary\" type=\"submit\">Załóż konto</button><p id=\"regErr\" class=\"tiny\" style=\"color:var(--crit)\"></p>": "<button class=\"btn btn-primary\" type=\"submit\">Create the account</button><p id=\"regErr\" class=\"tiny\" style=\"color:var(--crit)\"></p>",
+  "<div class=\"notice warn\"><span>Numer sprawdzamy tylko co do formatu: siedem cyfr u lekarza, od czterech do dwudziestu znaków u ratownika. Nie odpytujemy rejestru Naczelnej Izby Lekarskiej ani rejestru ratowników medycznych, więc konto samo w sobie nie jest dowodem uprawnień. Weryfikacja w rejestrze zostaje do zrobienia przed wdrożeniem.</span></div>": "<div class=\"notice warn\"><span>We check the number for format only: seven digits for a doctor, four to twenty characters for a paramedic. We do not query the register of the Supreme Medical Chamber or the register of paramedics, so an account is not in itself proof of qualifications. Verification against a register is still to be done before deployment.</span></div>",
+  "<p class=\"tiny muted\">Konto lekarza dodatkowo podpisuje wpisy w karcie: przy rozpoznaniu, leku i alergii zostaje nazwisko i numer PWZ. Ratownik kartę czyta, ale jej nie redaguje.</p>": "<p class=\"tiny muted\">A doctor account also signs entries in the card: a diagnosis, a medicine and an allergy keep the name and PWZ number. A paramedic reads the card but does not edit it.</p>",
+  "Numer w rejestrze ratowników": "Paramedic register number",
+  "Numer PWZ": "PWZ number",
+  "Numer z rejestru ratowników medycznych — od 4 do 20 znaków, cyfry, litery, znak / albo -.": "The number from the register of paramedics — 4 to 20 characters: digits, letters, / or -.",
+  "Siedem cyfr z prawa wykonywania zawodu.": "Seven digits from the medical licence.",
+  "Konto założone": "Account created",
+  "<div><p class=\"eyebrow\">Konto zawodowe: ": "<div><p class=\"eyebrow\">Professional account: ",
+  "</p><h1 style=\"font-size:2rem\">Otwórz kartę pacjenta</h1>": "</p><h1 style=\"font-size:2rem\">Open a patient card</h1>",
+  "Wystarczy identyfikator z opaski albo breloka — konto ratownika otwiera kartę w całości, bez PIN-u.": "The identifier from a band or a key fob is enough — a paramedic account opens the whole card, without a PIN.",
+  "Sam identyfikator otwiera kartę do odczytu. PIN pacjenta jest potrzebny dopiero do edycji: wpisy, które dodasz, zostaną podpisane twoim kontem.": "The identifier alone opens the card for reading. The patient's PIN is needed only for editing: the entries you add will be signed with your account.",
+  "<label class=\"f\">Kod dostępu (PIN pacjenta) — zostaw pusty, żeby tylko odczytać<input type=\"password\" name=\"pin\" inputmode=\"numeric\"></label>": "<label class=\"f\">Access code (patient PIN) — leave empty to read only<input type=\"password\" name=\"pin\" inputmode=\"numeric\"></label>",
+  "<button class=\"btn btn-primary\" type=\"submit\">Otwórz kartę pacjenta</button><p id=\"docErr\" class=\"tiny\" style=\"color:var(--crit)\"></p>": "<button class=\"btn btn-primary\" type=\"submit\">Open the patient card</button><p id=\"docErr\" class=\"tiny\" style=\"color:var(--crit)\"></p>",
+  "<p class=\"tiny muted\">Otwarcie karty zapisuje się w historii odczytów widocznej dla pacjenta — razem z twoim nazwiskiem i numerem.</p></div>": "<p class=\"tiny muted\">Opening the card is written into the read history the patient can see — together with your name and number.</p></div>",
+  "Nieprawidłowy kod dostępu.": "Wrong access code.",
+  "dostęp lekarza": "doctor access",
+  "zgłoszone oświadczenie DNR": "DNR declaration on file",
+  "zgoda na pobranie narządów": "consent to organ donation",
+  "Karta ratunkowa HERO · MediTag": "HERO emergency card · MediTag",
+  "Języki kontaktu: {0}": "Languages: {0}",
+  "Kod QR z adresem karty {0}": "QR code with the address of card {0}",
+  "Alergie": "Allergies",
+  "aktualizacja {0}": "updated {0}",
+  "Prototyp. Nie jest wyrobem medycznym i nie zastępuje wywiadu ratowniczego.": "Prototype. Not a medical device and no substitute for an emergency interview.",
+  "<button class=\"btn btn-primary\" id=\"doDruku\">Drukuj</button>": "<button class=\"btn btn-primary\" id=\"doDruku\">Print</button>",
+  "<button class=\"btn\" id=\"wrocZDruku\">Wróć</button>": "<button class=\"btn\" id=\"wrocZDruku\">Back</button>",
+  "<p class=\"tiny muted bez-druku\" style=\"text-align:center;margin-top:.6rem\">Wydruk mieści się na jednej stronie. Kod QR prowadzi pod ten sam adres co opaska.</p>": "<p class=\"tiny muted bez-druku\" style=\"text-align:center;margin-top:.6rem\">The printout fits on one page. The QR code leads to the same address as the band.</p>",
+  "<div><p class=\"eyebrow\">Nośnik <span class=\"tagid\">": "<div><p class=\"eyebrow\">Carrier <span class=\"tagid\">",
+  "</span></p><h3>Kto go zbliżył?</h3></div>": "</span></p><h3>Who tapped it?</h3></div>",
+  "Konto zawodowe": "Professional account",
+  "To moja karta": "This is my card",
+  "Otwórz kartę pacjenta": "Open a patient card",
+  "Otwórz swoją kartę": "Open my card",
+  "Karta otwiera się PIN-em pacjenta. Otwarcie trafi do historii razem z twoim nazwiskiem i numerem PWZ, a twoje wpisy dostaną twój podpis.": "The card opens with the patient's PIN. The opening goes into the history together with your name and PWZ number, and your entries get your signature.",
+  "PIN otwiera kartę do edycji. Ratownikowi wystarczy sam identyfikator z nośnika — PIN chroni edycję, nie odczyt ratunkowy.": "The PIN opens the card for editing. A paramedic needs the identifier from the carrier alone — the PIN protects editing, not the emergency read-out.",
+  "Kod dostępu (PIN pacjenta)": "Access code (patient PIN)",
+  "PIN": "PIN",
+  "<button class=\"btn btn-primary\" type=\"submit\">Otwórz kartę</button><p id=\"tagErr\" class=\"tiny\" style=\"color:var(--crit)\"></p>": "<button class=\"btn btn-primary\" type=\"submit\">Open the card</button><p id=\"tagErr\" class=\"tiny\" style=\"color:var(--crit)\"></p>",
+  "<div class=\"notice crit\"><span>Nośnik <b class=\"tagid\">": "<div class=\"notice crit\"><span>Carrier <b class=\"tagid\">",
+  "</b> wskazuje kartę, której nie ma ": "</b> points to a card that is not ",
+  "w bazie tego serwera.": "in this server's database.",
+  "w pamięci tej przeglądarki.": "in this browser's memory.",
+  " Karta mogła zostać usunięta.</span></div></div>": " The card may have been deleted.</span></div></div>",
+  "<div class=\"notice\"><span>To zestaw ratunkowy: wszystko, co pozwala pomóc, bez nazwiska i kontaktów. Kartę w całości otwiera konto lekarza albo ratownika medycznego.</span></div>": "<div class=\"notice\"><span>This is the emergency set: everything that helps, without a name or contacts. The whole card opens with a doctor or paramedic account.</span></div>",
+  "<div class=\"notice ok\"><span>Karta otwarta kontem: ": "<div class=\"notice ok\"><span>Card opened with account: ",
+  ". Ten odczyt jest zapisany w historii karty.</span></div>": ". This read-out is written into the card history.</span></div>",
+  "<div class=\"row\"><button class=\"btn btn-sm\" id=\"copyHand\">Skopiuj podsumowanie do przekazania</button>": "<div class=\"row\"><button class=\"btn btn-sm\" id=\"copyHand\">Copy handover summary</button>",
+  "?rola=lekarz\">Otwórz kartę kontem zawodowym</a>": "?rola=lekarz\">Open the card with a professional account</a>",
+  "?rola=edycja\">Otwórz do edycji (PIN pacjenta)</a>": "?rola=edycja\">Open for editing (patient PIN)</a>",
+  "\">Odczytaj z opisem czytnika</a></div></div>": "\">Read with a reader description</a></div></div>",
+  "<div class=\"notice crit\"><span>Adres z nośnika nie niesie poprawnego identyfikatora karty.</span></div>": "<div class=\"notice crit\"><span>The address from the carrier does not carry a valid card identifier.</span></div>",
+  "<p class=\"muted\">Otwieram kartę z nośnika…</p>": "<p class=\"muted\">Opening the card from the carrier…</p>",
+  "serwer HERO": "HERO server",
+  "dane w tej przeglądarce": "data in this browser",
+  "Karty zapisywane w bazie serwera HERO": "Cards stored in the HERO server database",
+  "Karty zapisywane w pamięci tej przeglądarki (localStorage)": "Cards stored in this browser (localStorage)",
+  "HERO — strona główna": "HERO — home page",
+  "Start": "Start",
+  "Moja karta": "My card",
+  "Odczyt ratunkowy": "Emergency read-out",
+  "Język strony": "Page language",
+  "Gdzie zapisywane są dane": "Where the data is stored",
+  "SPACER — przejdź na stronę zespołu": "SPACER — go to the team page",
+  "Zespół projektu HERO i MediTag": "The HERO and MediTag project team",
+  "HERO — Health Emergency Read Out. Prototyp interfejsu MediTag. Nie jest wyrobem medycznym i nie zastępuje wywiadu ratowniczego.": "HERO — Health Emergency Read Out. A MediTag interface prototype. Not a medical device and no substitute for an emergency interview.",
+  "Dane podstawowe": "Basic data",
+  "Leki": "Medication",
+  "Choroby": "Conditions",
+  "Kontakty": "Contacts",
+  "Nośniki": "Carriers",
+  "Historia odczytów": "Read history",
+  "łagodna": "mild",
+  "umiarkowana": "moderate",
+  "ciężka": "severe",
+  "anafilaksja": "anaphylaxis",
+  "aktywna": "active",
+  "kontrolowana": "controlled",
+  "przebyta": "past",
+  "lek": "drug",
+  "pokarm": "food",
+  "inne": "other",
+  "doustnie": "oral",
+  "podskórnie": "subcutaneous",
+  "dożylnie": "intravenous",
+  "domięśniowo": "intramuscular",
+  "wziewnie": "inhaled",
+  "przezskórnie": "transdermal",
+  "Opaska na rękę": "Wristband",
+  "Brelok do kluczy": "Key fob",
+  "Karta do portfela": "Wallet card",
+  "odczyt ratunkowy": "emergency read-out",
+  "dostęp ratownika": "paramedic access",
+  "pacjent": "patient",
+  "lekarz": "doctor",
+  "przykład": "example",
+  "zweryfikowane przez lekarza": "verified by a doctor",
+  "wpis pacjenta": "patient entry",
+  "<div class=\"scrollx\"><table><thead><tr><th>Kiedy</th><th>Kto</th><th>Kontekst</th></tr></thead><tbody>": "<div class=\"scrollx\"><table><thead><tr><th>When</th><th>Who</th><th>Context</th></tr></thead><tbody>",
+  "Wpis zostanie oznaczony jako: {0}": "The entry will be marked as: {0}",
+  "Reakcja nieopisana": "Reaction not described",
+  "kontakt pierwszy": "first contact",
+  "Bez konta": "No account",
+  "Bez konta zobaczysz sam zestaw ratunkowy.": "Without an account you will see the emergency set only.",
+  "Zalogowane konto: {0}": "Signed in as: {0}",
+  "ratownik": "paramedic",
+  "Ustawienia": "Settings",
+  "Język i wygląd": "Language and appearance",
+  "Oba ustawienia zostają w pamięci tej przeglądarki i nie wychodzą na serwer. Na innym telefonie trzeba je wybrać jeszcze raz.": "Both settings stay in this browser's memory and are not sent to any server. On another phone you have to choose them again.",
+  "Język": "Language",
+  "Jak w telefonie": "As on this phone",
+  "Teraz: {0} — tak ustawiony jest ten telefon.": "Now: {0} — that is how this phone is set.",
+  "Wybór zapamiętany. Ratownik z innym telefonem i tak zobaczy odczyt w swoim języku, bo liczy się ustawienie jego urządzenia.": "Choice remembered. A paramedic with another phone will still get the read-out in their language, because their device decides.",
+  "Motyw": "Theme",
+  "Jak w systemie": "As in the system",
+  "Jasny": "Light",
+  "Ciemny": "Dark",
+  "Ciemny motyw mniej razi w nocy, jasny lepiej czyta się w słońcu. Wydruk karty do portfela zostaje czarno na białym niezależnie od tego wyboru.": "A dark theme is easier on the eyes at night, a light one reads better in sunlight. The wallet card printout stays black on white either way.",
+};
+
 boot();
 })();
 </script>
