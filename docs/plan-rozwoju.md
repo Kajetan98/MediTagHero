@@ -30,25 +30,26 @@ procesu), a historia karty trzyma ostatnie 200 wpisów. Zostaje opis czytnika, k
 ratunkowym nadal jest deklaracją klienta: potwierdzi go dopiero uwierzytelnienie czytnika (punkt 4).
 Sam limit trzeba przenieść na wspólny magazyn, gdy serwer przestanie być jedną instancją.
 
-## 3. Identyfikator opaski
+## 3. Identyfikator i nośniki
 
 Zrobione: identyfikator nowej karty to 128 bitów losowości w base32 Crockforda (`genTag`), adres
-zapisywany w opasce ma ustalony kształt (rekord NDEF typu URL, trasa `#/t/<identyfikator>`),
-a zgubioną opaskę da się unieważnić — stary adres oddaje wtedy 410 z datą unieważnienia — albo
-przenieść kartę na nową opaskę jednym ruchem. Karty ze starymi, krótkimi identyfikatorami działają
-dalej.
+zapisywany w nośniku ma ustalony kształt (rekord NDEF typu URL, trasa `#/t/<identyfikator>`),
+a zgubiony nośnik da się unieważnić — jego identyfikator oddaje wtedy 410 z datą unieważnienia.
+Jedna karta nosi kilka nośników naraz (opaska, brelok do kluczy, karta do portfela), każdy ze swoim
+identyfikatorem, rodzajem i opisem; historia odczytów należy do karty, nie do nośnika. Karty ze
+starymi, krótkimi identyfikatorami działają dalej.
 
 Zostaje:
 
 - **osobny, krótki numer serwisowy** nadrukowany na opasce, do zgłoszenia zgubienia, nie do odczytu.
-  Dziś unieważnia się opaskę z karty, więc pacjent musi mieć dostęp do karty; numer serwisowy
+  Dziś unieważnia się nośnik z karty, więc pacjent musi mieć dostęp do karty; numer serwisowy
   przydaje się, gdy zgłasza utratę ktoś inny albo gdy zgłoszenie idzie poza aplikację.
 - **wymuszenie długości po stronie serwera** — dziś serwer bierze każdy identyfikator pasujący do
   `TAG` (do 32 znaków), bo inaczej odciąłby karty założone wcześniej i kartę przykładową z seeda.
-- **przypisanie opaski do karty jako osobna encja** (`tags`), bo jeden pacjent może mieć opaskę i kartę
-  na telefonie, a opaskę wymienia się częściej niż kartę. Dziś przeniesienie robi kopię karty pod nowym
-  identyfikatorem i zostawia nagrobek — działa, ale historia odczytów zostaje przy starej opasce,
-  a nie przy pacjencie.
+- ~~przypisanie nośnika do karty jako osobna encja~~ — zrobione: tabela `carriers`, adres własny karty
+  zostaje na miejscu, a opaskę wymienia się bez ruszania PIN-u i historii.
+- **rodzaj nośnika w wydruku i w odczycie ratunkowym** — dziś ratownik widzi identyfikator, ale nie to,
+  czy trzyma opaskę, czy brelok; przy kilku nośnikach jednej karty to ułatwiłoby zgłoszenie zgubienia.
 
 ## 4. Konta zawodowe: lekarz i ratownik medyczny
 

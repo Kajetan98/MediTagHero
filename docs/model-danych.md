@@ -165,19 +165,24 @@ base32 Crockforda bez I, L, O i U, `HERO-` plus 26 znaków). Skoro sam identyfik
 ratunkowy, jego długość jest tu jedyną ochroną przed zgadywaniem. Serwer formatu nie wymusza — bierze
 każdy identyfikator pasujący do `TAG` (do 32 znaków), bo karty założone wcześniej i karta przykładowa
 z `npm run seed` mają identyfikatory krótkie. Nikt takiego identyfikatora nie wpisze z pamięci, więc
-ekran pacjenta podaje listę opasek znanych tej przeglądarce, a pełny identyfikator zostaje w opasce
+ekran pacjenta podaje listę kart znanych tej przeglądarce, a pełny identyfikator zostaje w nośniku
 i w kodzie QR.
 
-**Unieważniona opaska zostaje w bazie jako nagrobek.** `revoked_at` nie usuwa wiersza: stary adres ma
-odpowiadać „opaska unieważniona" (410), a nie „nie ma takiej karty" (404), bo to dwie różne informacje
-dla ratownika, który właśnie zbliżył telefon. Unieważnienie zostawia treść karty — pacjent otwiera ją
-dalej PIN-em i może przenieść na nową opaskę. Przeniesienie (`move`) zakłada wiersz pod nowym
-identyfikatorem z tą samą treścią i tym samym PIN-em, a stary czyści z treści i nazwiska, zostawiając
-mu historię odczytów: historia dotyczy opaski, nie pacjenta, więc nowa startuje pusta.
+**Unieważniony nośnik zostaje w bazie jako nagrobek.** `revoked_at` nie usuwa wiersza: stary
+identyfikator ma odpowiadać „nośnik unieważniony" (410), a nie „nie ma takiej karty" (404), bo to dwie
+różne informacje dla ratownika, który właśnie zbliżył telefon. To samo pole jest w `cards`
+(odcięcie całej karty) i w `carriers` (jeden zgubiony nośnik); oba zostawiają treść karty, którą
+pacjent otwiera dalej PIN-em.
 
-Nowy adres wymaga skrótu PIN-u przeliczonego dla niego, bo skrót wiąże się z identyfikatorem opaski
-(`hero:<tag>:<pin>`). Dlatego przeniesienie pyta pacjenta o PIN jeszcze raz, choć sesja jest otwarta:
-przeglądarka trzyma sam skrót, nie PIN.
+**Karta ma jeden adres własny, nośników dowolnie wiele.** `cards.tag_id` nie zmienia się przez całe
+życie karty, bo wiąże się z nim skrót PIN-u (`hero:<tag>:<pin>`); `carriers.tag_id` to identyfikator
+zapisany w opasce, breloku albo na karcie do portfela, a `carriers.card_id` mówi, do której karty
+prowadzi. Pierwszy nośnik powstaje razem z kartą i jest nim sam adres własny. Dzięki temu wymiana
+zgubionej opaski nie rusza ani PIN-u, ani historii odczytów: historia należy do karty, nie do rzeczy,
+którą pacjent nosi. Rozwiązanie identyfikatora bez treści karty daje `GET /api/tags/:tag`.
+
+Identyfikator zajęty przez nośnik nie założy pod sobą własnej karty (`upsert` odpowiada 409):
+prowadziłby wtedy w dwa miejsca naraz.
 
 **Identyfikatory wpisów nadaje przeglądarka** (`Math.random`), bo wpisy nie wychodzą poza jedną kartę.
 Identyfikatory odczytów nadaje serwer (`randomUUID`), bo są dowodem dostępu — poza trybem bez

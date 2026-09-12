@@ -128,8 +128,9 @@ test("zestaw ratunkowy w przeglądarce i na serwerze opisuje ten sam zakres", as
 
   const kli = rescueOf(store.cards.fullCard(TAG));
   const srv = (await J(`/api/cards/${TAG}`)).body;
-  /* Pola puste pomijamy: serwer oddaje `revokedAt: null`, aplikacja tego pola nie zna. */
-  const klucze = o => Object.keys(o).filter(k => o[k] !== undefined && o[k] !== null).sort();
+  /* Pola puste pomijamy: serwer oddaje `revokedAt: null`, aplikacja tego pola nie zna. `carrier`
+     opisuje nośnik użyty w żądaniu, nie zakres karty, więc do porównania zakresu nie należy. */
+  const klucze = o => Object.keys(o).filter(k => k !== "carrier" && o[k] !== undefined && o[k] !== null).sort();
 
   assert.deepEqual(klucze(kli), klucze(srv), "ten sam zestaw pól na wierzchu");
   assert.deepEqual(klucze(kli.person), klucze(srv.person), "ten sam zestaw pól o pacjencie");
@@ -437,41 +438,56 @@ test("unieważniona opaska nie oddaje karty pod starym adresem", async () => {
   assert.equal(drugi.body.revokedAt, out.body.revokedAt, "drugie unieważnienie nie przesuwa daty");
 });
 
-test("kartę przenosi się na nową opaskę razem z treścią", async () => {
-  const stary = "HERO-6200-KB", nowy = "HERO-6300-KC";
-  const pinStary = digest(stary, "4321"), pinNowy = digest(nowy, "4321");
-  assert.equal((await J(`/api/cards/${stary}`, jsonBody("PUT", { ...newCard(), pinHash: pinStary }))).status, 201);
-  assert.equal((await J(`/api/cards/${stary}/reads`, jsonBody("POST", { by: "ZRM P-3" }))).status, 201);
+test("karta nosi kilka nośników i każdy gaśnie osobno", async () => {
+  const tag = "HERO-6200-KB", brelok = "HERO-6300-KC";
+  const pin = digest(tag, "4321");
+  assert.equal((await J(`/api/cards/${tag}`, jsonBody("PUT",
+    { ...newCard(), pinHash: pin, carrier: { kind: "opaska", label: "opaska na rękę" } }))).status, 201);
 
-  const ruch = (body, pin) => J(`/api/cards/${stary}/move`, jsonBody("POST", body, pin ? { "x-hero-pin": pin } : {}));
+  const dodaj = (body, klucz) => J(`/api/cards/${tag}/carriers`, jsonBody("POST", body, klucz ? { "x-hero-pin": klucz } : {}));
 
-  assert.equal((await ruch({ tagId: nowy, pinHash: pinNowy }, digest(stary, "0000"))).status, 403, "bez PIN-u nie ma przenoszenia");
-  assert.equal((await ruch({ tagId: nowy }, pinStary)).status, 400, "nowy adres wymaga skrótu PIN-u przeliczonego dla niego");
-  assert.equal((await ruch({ tagId: "nie ma takiego", pinHash: pinNowy }, pinStary)).status, 400);
-  assert.equal((await ruch({ tagId: stary, pinHash: pinNowy }, pinStary)).status, 409, "w to samo miejsce nie ma po co");
+  assert.equal((await dodaj({ tagId: brelok, kind: "brelok" })).status, 403, "nośnik dodaje właściciel PIN-u");
+  assert.equal((await dodaj({ tagId: "nie ma takiego", kind: "brelok" }, pin)).status, 400);
+  assert.equal((await dodaj({ tagId: tag, kind: "brelok" }, pin)).status, 409, "adres własny karty jest już nośnikiem");
 
-  const out = await ruch({ tagId: nowy, pinHash: pinNowy }, pinStary);
-  assert.equal(out.status, 201);
-  assert.equal(out.body.tagId, nowy);
-  assert.equal(out.body.person.name, "Jan Kowalski");
-  assert.equal(out.body.allergies[0].allergen, "Penicylina", "wpisy przechodzą w całości");
-  assert.equal(out.body.reads.length, 0, "nowa opaska startuje z pustą historią");
+  const dodany = await dodaj({ tagId: brelok, kind: "brelok", label: "brelok do kluczy" }, pin);
+  assert.equal(dodany.status, 201);
+  assert.deepEqual(dodany.body.map(n => [n.tagId, n.kind]), [[tag, "opaska"], [brelok, "brelok"]]);
 
-  assert.equal((await J(`/api/cards/${stary}`)).status, 410, "stara opaska odcięta");
-  assert.equal((await J(`/api/cards/${nowy}`)).status, 200, "nowa działa dla ratownika");
+  const zBreloka = await J(`/api/cards/${brelok}`);
+  assert.equal(zBreloka.status, 200, "brelok prowadzi do tej samej karty");
+  assert.equal(zBreloka.body.tagId, tag, "odpowiedź niesie adres własny karty, nie identyfikator nośnika");
+  assert.equal(zBreloka.body.carrier.kind, "brelok", "wiadomo, czym otwarto kartę");
+  assert.equal(zBreloka.body.carrier.label, undefined, "opisu od pacjenta nie oddajemy bez konta — potrafi nieść imię");
+  assert.equal(zBreloka.body.carriers, undefined, "bez konta nie widać, jakie jeszcze nośniki prowadzą do tej karty");
 
-  assert.equal((await J(`/api/cards/${nowy}/session`, jsonBody("POST", { digest: pinNowy }))).status, 200,
-    "ten sam PIN, skrót przeliczony dla nowego adresu");
-  assert.equal((await J(`/api/cards/${nowy}/session`, jsonBody("POST", { digest: pinStary }))).status, 403,
-    "stary skrót do nowego adresu nie pasuje");
+  const wskaz = await J(`/api/tags/${brelok}`);
+  assert.equal(wskaz.status, 200);
+  assert.deepEqual(wskaz.body, { tagId: tag, kind: "brelok", revoked: false, revokedAt: null },
+    "samo rozwiązanie identyfikatora, bez treści karty");
+  assert.equal((await J("/api/tags/HERO-NIE-MA")).status, 404);
 
-  const nagrobek = await J(`/api/cards/${stary}/session`, jsonBody("POST", { digest: pinStary }));
-  assert.equal(nagrobek.status, 200);
-  assert.deepEqual(nagrobek.body.person, {}, "pod starym adresem nie zostaje treść karty");
-  assert.equal(nagrobek.body.reads.length, 1, "historia odczytów zostaje przy tamtej opasce");
+  assert.equal((await J(`/api/cards/${brelok}/reads`, jsonBody("POST", { by: "ZRM P-3" }))).status, 201);
+  const sesja = await J(`/api/cards/${tag}/session`, jsonBody("POST", { digest: pin }));
+  assert.equal(sesja.body.reads.length, 1, "historia jest przy karcie, nie przy nośniku");
+  assert.deepEqual(sesja.body.carriers.map(n => n.label), ["opaska na rękę", "brelok do kluczy"],
+    "pacjent widzi swoje nośniki po opisie, który sam im nadał");
 
-  assert.equal((await ruch({ tagId: "HERO-6400-KD", pinHash: digest("HERO-6400-KD", "4321") }, pinNowy)).status, 403,
-    "skrótem nowej opaski nie przeniesie się starej");
+  assert.equal((await J(`/api/cards/${tag}/carriers/${brelok}`, { method: "DELETE" })).status, 403);
+  const po = await J(`/api/cards/${tag}/carriers/${brelok}`, { method: "DELETE", headers: { "x-hero-pin": pin } });
+  assert.equal(po.status, 200);
+  assert.match(po.body[1].revokedAt, /^\d{4}-\d{2}-\d{2}T/);
+  assert.equal((await J(`/api/cards/${brelok}`)).status, 410, "zgubiony brelok jest odcięty");
+  assert.equal((await J(`/api/cards/${brelok}/reads`, jsonBody("POST", { by: "ZRM P-4" }))).status, 410);
+  assert.equal((await J(`/api/tags/${brelok}`)).body.revoked, true);
+  assert.equal((await J(`/api/cards/${tag}`)).status, 200, "opaska działa dalej");
+  assert.equal((await J(`/api/cards/${tag}/carriers/HERO-9999-ZZ`, { method: "DELETE", headers: { "x-hero-pin": pin } })).status, 404,
+    "cudzego nośnika nie unieważnisz swoim PIN-em");
+
+  const obcy = "HERO-6400-KD";
+  assert.equal((await dodaj({ tagId: obcy, kind: "karta" }, pin)).status, 201);
+  assert.equal((await J(`/api/cards/${obcy}`, jsonBody("PUT", { ...newCard(), pinHash: digest(obcy, "1111") }))).status, 409,
+    "identyfikator zajęty przez nośnik nie założy pod sobą drugiej karty");
 });
 
 test("token lekarza starszy niż doba przestaje być kontem", async () => {

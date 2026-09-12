@@ -333,6 +333,15 @@ function toast(msg){ const t=document.createElement("div"); t.className="toast";
 const LS = "hero.cards.v1";
 const LSD = "hero.doctors.v1";
 const LSO = "hero.owners.v1";
+const LSC = "hero.carriers.v1";
+/* Rodzaje nośnika — ta sama lista co w server/db.js. Opaska dla osób starszych i dla dzieci,
+   brelok do kluczy dla tych, którzy opaski nie założą, karta do portfela jako zapas bez baterii. */
+const KIND = [["opaska","Opaska na rękę"],["brelok","Brelok do kluczy"],["karta","Karta do portfela"]];
+const kindName = k => (KIND.find(x => x[0] === k) || KIND[0])[1];
+/** Nazwa w dopełniaczu: „zbliżenie breloka", „zgubienie opaski". */
+const kindDop = k => k === "brelok" ? "breloka" : k === "karta" ? "karty" : "opaski";
+/** Nazwa w bierniku: „przyłóż opaskę", „przyłóż brelok". */
+const kindBier = k => k === "brelok" ? "brelok" : k === "karta" ? "kartę" : "opaskę";
 const PWZ_RE = /^[0-9]{7}$/;
 /* Numer w rejestrze ratowników medycznych nie ma ustalonego formatu — sprawdzamy długość i znaki. */
 const RATOWNIK_RE = /^[A-Za-z0-9/-]{4,20}$/;
@@ -360,6 +369,23 @@ async function digest(tagId, pin){
 function lsAll(){ try { return JSON.parse(localStorage.getItem(LS) || "{}"); } catch(e){ return {}; } }
 function lsSave(all){ try { localStorage.setItem(LS, JSON.stringify(all)); } catch(e){} }
 function lsDocs(){ try { return JSON.parse(localStorage.getItem(LSD) || "{}"); } catch(e){ return {}; } }
+function lsCarriers(){ try { return JSON.parse(localStorage.getItem(LSC) || "{}"); } catch(e){ return {}; } }
+function lsCarriersSave(all){ try { localStorage.setItem(LSC, JSON.stringify(all)); } catch(e){} }
+/**
+ * Nośniki karty w trybie bez serwera. Adres własny karty jest pierwszym nośnikiem także tutaj;
+ * karty założone przed rejestrem dostają swój wiersz przy pierwszym otwarciu.
+ */
+function localCarriers(cardId){
+  const all = lsCarriers();
+  if(!all[cardId]){
+    const c = lsAll()[cardId];
+    if(!c) return [];
+    all[cardId] = {tagId:cardId, cardId, kind:"opaska", label:"", createdAt:c.updatedAt || nowISO(), revokedAt:c.revokedAt || null};
+    lsCarriersSave(all);
+  }
+  return Object.values(all).filter(n => n.cardId === cardId)
+    .sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
+}
 function lsDocsSave(all){ try { localStorage.setItem(LSD, JSON.stringify(all)); } catch(e){} }
 
 /**
@@ -493,12 +519,34 @@ const store = {
       if(!r.ok) return null;
       return r.json();
     }
-    const c = lsAll()[tagId];
+    const n = lsCarriers()[tagId];
+    const id = n ? n.cardId : tagId;
+    const c = lsAll()[id];
     if(!c) return null;
-    if(c.revokedAt) return {tagId, revoked:true, revokedAt:c.revokedAt};
+    const odciety = (n && n.revokedAt) || c.revokedAt;
+    if(odciety) return {tagId, revoked:true, revokedAt:odciety};
     /* Bez serwera karta leży w tej przeglądarce, więc nie ma czego egzekwować. Zakres pokazujemy
        jednak ten sam, co serwer wydaje bez konta — inaczej demonstracja kłamałaby o dostępie. */
-    return DOCTOR ? c : rescueOf(c);
+    const karta = DOCTOR ? Object.assign({}, c, {carriers: localCarriers(id)}) : rescueOf(c);
+    karta.carrier = {tagId, kind: n ? n.kind : "opaska"};
+    return karta;
+  },
+  /**
+   * Identyfikator z nośnika → adres karty, do której prowadzi. Skrót PIN-u wiąże się z adresem
+   * karty, nie nośnika, więc każde wejście po PIN-ie zaczyna się od tego pytania.
+   */
+  async resolve(tagId){
+    if(API){
+      const r = await fetch(api("tags/" + encodeURIComponent(tagId)));
+      if(!r.ok) return null;
+      return r.json();
+    }
+    const n = lsCarriers()[tagId];
+    const id = n ? n.cardId : tagId;
+    const c = lsAll()[id];
+    if(!c) return null;
+    const odciety = (n && n.revokedAt) || c.revokedAt || null;
+    return {tagId:id, kind: n ? n.kind : "opaska", revoked: !!odciety, revokedAt: odciety};
   },
   async list(){
     if(API){ const r = await fetch(api("cards")); if(!r.ok) return []; return r.json(); }
@@ -517,7 +565,8 @@ const store = {
     const c = lsAll()[tagId];
     if(!c) return {ok:false, reason:"nieznany"};
     if(c.pinHash && c.pinHash !== dg) return {ok:false, reason:"pin"};
-    PIN_DG = dg; return {ok:true, card:c};
+    PIN_DG = dg;
+    return {ok:true, card: Object.assign({}, c, {carriers: localCarriers(tagId)})};
   },
   async verify(tagId, pin){ return this.openWithDigest(tagId, await digest(tagId, pin)); },
   async save(card){
@@ -530,7 +579,10 @@ const store = {
       /* Serwer oddaje kartę po swojemu: to on nadaje podpisy, więc bierzemy jego wersję. */
       return await r.json();
     }
-    const all = lsAll(); all[card.tagId] = card; lsSave(all); return card;
+    /* Lista nośników ma jedno miejsce (`hero.carriers.v1`), więc nie odkłada się w treści karty. */
+    const { carriers, carrier, ...tresc } = card;
+    const all = lsAll(); all[card.tagId] = tresc; lsSave(all);
+    return Object.assign({}, tresc, {carriers: localCarriers(card.tagId)});
   },
   async remove(tagId){
     if(API){ await fetch(api("cards/" + encodeURIComponent(tagId)), {method:"DELETE", headers:{"x-hero-pin": PIN_DG || ""}}); return; }
@@ -567,30 +619,40 @@ const store = {
     return {ok:true, revokedAt: c.revokedAt};
   },
   /**
-   * Przeniesienie karty na nową opaskę. Skrót PIN-u wiąże się z identyfikatorem opaski, więc nowy
-   * adres wymaga skrótu przeliczonego dla niego — dlatego przeniesienie pyta o PIN jeszcze raz.
+   * Nowy nośnik tej samej karty: druga opaska, brelok do kluczy, karta do portfela. Skrótu PIN-u
+   * nie trzeba przeliczać — adres własny karty się nie zmienia, nośnik tylko na nią wskazuje.
    */
-  async move(tagId, nowy, dgNowy){
+  async addCarrier(cardId, {tagId, kind, label}){
     if(API){
-      const r = await fetch(api("cards/" + encodeURIComponent(tagId) + "/move"), {method:"POST",
+      const r = await fetch(api("cards/" + encodeURIComponent(cardId) + "/carriers"), {method:"POST",
         headers:{"content-type":"application/json", "x-hero-pin": PIN_DG || ""},
-        body: JSON.stringify({tagId:nowy, pinHash:dgNowy})});
+        body: JSON.stringify({tagId, kind, label})});
       const j = await r.json().catch(() => ({}));
-      if(!r.ok) return {ok:false, error: j.error || "Serwer odrzucił przeniesienie (" + r.status + ")"};
-      return {ok:true, card:j};
+      if(!r.ok) return {ok:false, error: j.error || "Serwer odrzucił nowy nośnik (" + r.status + ")"};
+      return {ok:true, carriers:j};
     }
-    const all = lsAll(), c = all[tagId];
-    if(!c) return {ok:false, error:"Nie ma karty o tym identyfikatorze"};
-    if(all[nowy]) return {ok:false, error:"Karta o tym identyfikatorze już istnieje"};
-    const kopia = JSON.parse(JSON.stringify(c));
-    kopia.tagId = nowy; kopia.pinHash = dgNowy; kopia.reads = []; kopia.demo = false;
-    delete kopia.revokedAt;
-    all[nowy] = kopia;
-    /* Pod starym adresem zostaje nagrobek: historia odczytów tamtej opaski, bez treści karty. */
-    c.revokedAt = nowISO();
-    c.person = {}; c.allergies = []; c.meds = []; c.conditions = []; c.contacts = [];
-    lsSave(all);
-    return {ok:true, card:kopia};
+    const all = lsCarriers();
+    if(all[tagId] || lsAll()[tagId]) return {ok:false, error:"Ten identyfikator jest już zajęty"};
+    localCarriers(cardId);
+    const zapis = lsCarriers();
+    zapis[tagId] = {tagId, cardId, kind, label, createdAt: nowISO(), revokedAt: null};
+    lsCarriersSave(zapis);
+    return {ok:true, carriers: localCarriers(cardId)};
+  },
+  /** Unieważnienie jednego nośnika. Karta i pozostałe nośniki zostają. Nieodwracalne. */
+  async revokeCarrier(cardId, tagId){
+    if(API){
+      const r = await fetch(api("cards/" + encodeURIComponent(cardId) + "/carriers/" + encodeURIComponent(tagId)),
+        {method:"DELETE", headers:{"x-hero-pin": PIN_DG || ""}});
+      const j = await r.json().catch(() => ({}));
+      if(!r.ok) return {ok:false, error: j.error || "Serwer odrzucił unieważnienie (" + r.status + ")"};
+      return {ok:true, carriers:j};
+    }
+    const all = lsCarriers();
+    if(!all[tagId] || all[tagId].cardId !== cardId) return {ok:false, error:"Ta karta nie ma takiego nośnika"};
+    all[tagId].revokedAt = all[tagId].revokedAt || nowISO();
+    lsCarriersSave(all);
+    return {ok:true, carriers: localCarriers(cardId)};
   },
   async logRead(tagId, by, ctx){
     const payload = {by: by || "nieznany czytnik", ctx: ctx || "odczyt ratunkowy"};
@@ -601,7 +663,9 @@ const store = {
       return Object.assign({id:uid(), at:nowISO()}, payload);
     }
     const entry = Object.assign({id:uid(), at:nowISO()}, payload);
-    const all = lsAll(); const c = all[tagId]; if(!c) return entry;
+    /* Bez serwera nośnik trzeba rozwiązać samemu: historia należy do karty, nie do breloka. */
+    const n = lsCarriers()[tagId];
+    const all = lsAll(); const c = all[n ? n.cardId : tagId]; if(!c) return entry;
     c.reads = [entry].concat(c.reads || []).slice(0, 50); lsSave(all); return entry;
   }
 };
@@ -1147,7 +1211,7 @@ async function renderStart(){
   +   '<div>'
   +     '<p class="eyebrow">Health Emergency Read Out</p>'
   +     '<h1>Karta pacjenta, którą ratownik otwiera <em>jednym zbliżeniem</em>.</h1>'
-  +     '<p class="lead">MediTag to wodoodporna opaska NFC. HERO to platforma, w której pacjent i lekarz prowadzą jedną kartę: alergie, przyjmowane leki, choroby przewlekłe, grupę krwi i kontakty alarmowe. Odczyt ratunkowy działa bez logowania — także wtedy, gdy pacjent jest nieprzytomny.</p>'
+  +     '<p class="lead">MediTag to wodoodporna opaska NFC — a dla tych, którzy opaski nie założą, brelok do kluczy z tym samym układem. HERO to platforma, w której pacjent i lekarz prowadzą jedną kartę: alergie, przyjmowane leki, choroby przewlekłe, grupę krwi i kontakty alarmowe. Odczyt ratunkowy działa bez logowania — także wtedy, gdy pacjent jest nieprzytomny.</p>'
   +     '<div class="cta"><a class="btn btn-primary" href="#/karta">Załóż kartę</a><a class="btn" href="#/odczyt">Wykonaj odczyt ratunkowy</a></div>'
   +     '<div class="claim">'
   +       '<div><b>Bez logowania</b><span class="tiny muted">odczyt ratunkowy nie wymaga konta</span></div>'
@@ -1172,7 +1236,7 @@ async function renderStart(){
   +   '<h2>Jak przebiega zdarzenie</h2>'
   +   '<div class="steps">'
   +     '<div class="step"><span class="n">1</span><div><h3>Pacjent prowadzi kartę</h3><p class="small muted">Sam albo razem z lekarzem wpisuje alergie, leki i choroby. Wpis lekarza niesie jego nazwisko i numer PWZ.</p></div></div>'
-  +     '<div class="step"><span class="n">2</span><div><h3>Opaska nosi identyfikator</h3><p class="small muted">Kartę zapisujesz na opasce jednym zbliżeniem — zakładka „Opaska NFC”. W pamięci opaski zostaje sam adres karty, bez danych medycznych.</p></div></div>'
+  +     '<div class="step"><span class="n">2</span><div><h3>Nośnik niesie identyfikator</h3><p class="small muted">Kartę zapisujesz na opasce albo na breloku do kluczy jednym zbliżeniem — zakładka „Nośniki”. W pamięci nośnika zostaje sam adres karty, bez danych medycznych.</p></div></div>'
   +     '<div class="step"><span class="n">3</span><div><h3>Zbliżenie otwiera kartę</h3><p class="small muted">Zakres zależy od tego, kto zbliżył telefon: bez konta widać sam zestaw ratunkowy, konto lekarza albo ratownika otwiera kartę w całości, pacjent wchodzi do niej PIN-em. Każdy odczyt jest logowany.</p></div></div>'
   +   '</div>'
   + '</section>'
@@ -1181,7 +1245,7 @@ async function renderStart(){
   +   '<div class="roles">'
   +     '<a class="role" href="#/karta"><h3>Pacjent</h3><p>Zakładasz kartę, ustawiasz PIN i decydujesz, co widzi ratownik. Możesz kartę usunąć w każdej chwili.</p><div class="go">Moja karta →</div></a>'
   +     '<a class="role" href="#/lekarz"><h3>Lekarz i ratownik medyczny</h3><p>Konto zawodowe otwiera kartę w całości: nazwisko, kontakty alarmowe, pełną listę rozpoznań. Lekarz dopisuje rozpoznania, leki i alergie — każdy wpis niesie jego nazwisko i numer.</p><div class="go">Konto zawodowe →</div></a>'
-  +     '<a class="role crit" href="#/odczyt"><h3>Bez konta</h3><p>Sam identyfikator opaski, bez hasła. Zestaw ratunkowy: grupa krwi, alergie, antykoagulanty, wszczepy, DNR — bez nazwiska i kontaktów.</p><div class="go">Odczyt ratunkowy →</div></a>'
+  +     '<a class="role crit" href="#/odczyt"><h3>Bez konta</h3><p>Sam identyfikator z nośnika, bez hasła. Zestaw ratunkowy: grupa krwi, alergie, antykoagulanty, wszczepy, DNR — bez nazwiska i kontaktów.</p><div class="go">Odczyt ratunkowy →</div></a>'
   +   '</div>'
   + '</section>'
 
@@ -1242,12 +1306,12 @@ function medRowRO(m){
 function condRowRO(c){
   return '<div class="rec '+(c.status==="aktywna"?"s2":"s1")+'"><div class="main"><div class="name">'+esc(c.name)+' <span class="tag">'+esc(c.status)+'</span>'+sigTag(c)+'</div><div class="meta">'+(c.icd10?'<span class="code">ICD-10 '+esc(c.icd10)+'</span>':"")+(c.note?' · '+esc(c.note):"")+'</div></div></div>';
 }
-/** Ratownik ze starą opaską w ręku musi wiedzieć, że trafił na odciętą, a nie na zepsuty serwis. */
+/** Ratownik ze zgubionym nośnikiem w ręku musi wiedzieć, że trafił na odcięty, a nie na zepsuty serwis. */
 function revokedHTML(tagId, revokedAt){
-  return '<div class="notice crit"><span><b>Opaska unieważniona</b>'
+  return '<div class="notice crit"><span><b>Nośnik unieważniony</b>'
   + (revokedAt ? ' ' + esc(fmtDT(revokedAt)) : "")
-  + '. Pacjent zgłosił utratę tej opaski, więc pod jej adresem nie ma karty. Jeśli pacjent jest przytomny, '
-  + 'poproś o nową opaskę; jeśli nie — szukaj drugiej opaski albo dokumentów. Identyfikator: '
+  + '. Pacjent zgłosił jego utratę, więc pod tym identyfikatorem nie ma karty. Jeśli pacjent jest przytomny, '
+  + 'poproś o inny nośnik; jeśli nie — szukaj drugiej opaski, breloka albo dokumentów. Identyfikator: '
   + '<span class="tagid">' + esc(tagId) + '</span></span></div>';
 }
 
@@ -1267,13 +1331,13 @@ async function renderScan(params){
   const pre = params.get("tag") || "";
   view.innerHTML = '<div class="stack" style="max-width:760px;margin-inline:auto">'
   + '<div><p class="eyebrow">' + (DOCTOR ? 'Konto zawodowe: ' + esc(kontoRola(DOCTOR)) : 'Bez konta') + '</p><h1 style="font-size:2rem">Odczyt ratunkowy</h1>'
-  + '<p class="muted" style="margin-top:.5rem">W realnym urządzeniu ten ekran otwiera się po zbliżeniu telefonu do opaski. Tutaj wpisz identyfikator karty ręcznie. '
+  + '<p class="muted" style="margin-top:.5rem">W realnym urządzeniu ten ekran otwiera się po zbliżeniu telefonu do opaski albo breloka. Tutaj wpisz identyfikator ręcznie. '
   +   (DOCTOR ? 'Twoje konto otwiera kartę w całości.' : 'Bez konta zobaczysz sam zestaw ratunkowy.') + '</p></div>'
   + '<div class="panel"><div class="panel-b"><form id="scanForm" class="row">'
-  +   '<label class="f" style="flex:2 1 220px">Identyfikator opaski<input class="mono" name="tag" placeholder="identyfikator z opaski" value="'+esc(pre)+'" required></label>'
+  +   '<label class="f" style="flex:2 1 220px">Identyfikator z nośnika<input class="mono" name="tag" placeholder="z opaski, breloka albo karty" value="'+esc(pre)+'" required></label>'
   +   (DOCTOR ? '' : '<label class="f" style="flex:1 1 160px">Kto odczytuje<input name="by" placeholder="ZRM P-12 / SOR"></label>')
   +   '<button class="btn btn-crit" type="submit">Odczytaj kartę</button>'
-  +   (nfcReady() ? '<button class="btn" type="button" id="scanNfc">Odczytaj z opaski</button>' : "")
+  +   (nfcReady() ? '<button class="btn" type="button" id="scanNfc">Odczytaj z nośnika</button>' : "")
   + '</form><p class="tiny muted" style="margin-top:.6rem">Odczyt nie wymaga PIN-u i zostaje zapisany w historii karty — '
   +   (DOCTOR ? 'pod nazwiskiem i numerem z twojego konta.' : 'wraz z podanym opisem czytnika.') + '</p></div></div>'
   + '<div id="scanOut"></div></div>';
@@ -1282,10 +1346,10 @@ async function renderScan(params){
   const form = document.getElementById("scanForm");
   const nfcBtn = document.getElementById("scanNfc");
   if(nfcBtn) nfcBtn.addEventListener("click", async () => {
-    out.innerHTML = '<div class="notice"><span>Przyłóż opaskę do telefonu…</span></div>';
+    out.innerHTML = '<div class="notice"><span>Przyłóż nośnik do telefonu…</span></div>';
     const r = await nfcScan(tag => {
       nfcStop();
-      if(!tag){ out.innerHTML = '<div class="notice warn"><span>W tej opasce nie ma adresu karty HERO.</span></div>'; return; }
+      if(!tag){ out.innerHTML = '<div class="notice warn"><span>Nie ma tam adresu karty HERO.</span></div>'; return; }
       location.hash = "#/t/" + encodeURIComponent(tag);
     });
     if(!r.ok) out.innerHTML = '<div class="notice crit"><span>'+esc(r.error)+'</span></div>';
@@ -1316,7 +1380,7 @@ async function renderScan(params){
 
 /* ---------------- card editor ---------------- */
 let CARD = null, ROLE = "pacjent", TAB = "podstawowe", EDIT = {};
-const TABS = [["podstawowe","Dane podstawowe"],["alergie","Alergie"],["leki","Leki"],["choroby","Choroby"],["kontakty","Kontakty"],["opaska","Opaska NFC"],["historia","Historia odczytów"]];
+const TABS = [["podstawowe","Dane podstawowe"],["alergie","Alergie"],["leki","Leki"],["choroby","Choroby"],["kontakty","Kontakty"],["nosniki","Nośniki"],["historia","Historia odczytów"]];
 const ROUTES = ["doustnie","podskórnie","dożylnie","domięśniowo","wziewnie","przezskórnie","inne"];
 function opt(list, cur){ return list.map(v => '<option value="'+esc(v)+'"'+(String(cur)===String(v)?" selected":"")+'>'+esc(v)+'</option>').join(""); }
 
@@ -1328,7 +1392,7 @@ function renderEditor(){
   + '<div class="panel"><div class="panel-h">'
   +   '<div><p class="eyebrow">'+(isDoc ? "Rola: lekarz — " + esc(DOCTOR ? kontoOpis(DOCTOR) : "konto nieznane") : "Rola: pacjent")+'</p>'
   +   '<h3>'+esc(p.name || "Karta bez nazwiska")+' <span class="tagid tiny muted">'+esc(CARD.tagId)+'</span>'
-  +   (CARD.revokedAt ? ' <span class="tag tag-crit">opaska unieważniona</span>' : "")+'</h3>'
+  +   (CARD.revokedAt ? ' <span class="tag tag-crit">karta odcięta</span>' : "")+'</h3>'
   +   '<p class="tiny muted">Ostatnia zmiana: '+esc(fmtDT(CARD.updatedAt))+' · '+esc(CARD.updatedBy||"pacjent")+'</p></div>'
   +   '<div class="row" style="margin-left:auto">'
   +     '<a class="btn btn-sm" href="#/odczyt?tag='+encodeURIComponent(CARD.tagId)+'">Podgląd odczytu</a>'
@@ -1384,7 +1448,7 @@ async function renderTab(){
     /* PIN chroni edycję karty, więc zmienia go pacjent, nie lekarz z dostępem do tej samej karty. */
     + (ROLE === "pacjent"
       ? '<details style="margin-top:1.2rem"><summary class="small muted" style="cursor:pointer">Zmiana PIN-u</summary>'
-        + '<p class="small muted" style="margin:.6rem 0">PIN otwiera kartę do edycji — jeśli ktoś go poznał, zmień go tutaj. Karta, historia odczytów i opaska zostają bez zmian, bo PIN-u nie ma w opasce.</p>'
+        + '<p class="small muted" style="margin:.6rem 0">PIN otwiera kartę do edycji — jeśli ktoś go poznał, zmień go tutaj. Karta, historia odczytów i nośniki zostają bez zmian, bo PIN-u nie ma w żadnym z nich.</p>'
         + '<form id="fPin" class="stack" style="max-width:340px">'
         +   '<label class="f">Obecny PIN<input type="password" name="stary" inputmode="numeric" required></label>'
         +   '<label class="f">Nowy PIN<input type="password" name="nowy" inputmode="numeric" minlength="4" maxlength="6" required placeholder="4–6 cyfr"></label>'
@@ -1420,84 +1484,127 @@ async function renderTab(){
     return;
   }
 
-  if(TAB === "opaska"){
+  if(TAB === "nosniki"){
     const base = appBase(location);
-    const url = tagUrl(CARD.tagId, base);
     const martwa = !!CARD.revokedAt;
     const mozeZapisac = nfcReady() && !martwa;
-    b.innerHTML = '<div class="stack">'
+    /* Karta zawsze ma co najmniej jeden nośnik: swój adres własny. Gdyby lista nie doszła (stara
+       baza, tryb bez serwera przed migracją), pokazujemy właśnie ten adres. */
+    const lista = (CARD.carriers && CARD.carriers.length)
+      ? CARD.carriers
+      : [{tagId: CARD.tagId, kind: "opaska", label: "", revokedAt: CARD.revokedAt || null}];
+
+    const panelNos = n => {
+      const url = tagUrl(n.tagId, base);
+      const zgasl = !!n.revokedAt || martwa;
+      return '<div class="panel" data-nos="'+esc(n.tagId)+'">'
+      + '<div class="panel-h"><div><p class="eyebrow">'+esc(kindName(n.kind))+'</p>'
+      +   '<h3>'+esc(n.label || kindName(n.kind))+' <span class="mono tiny muted">'+esc(n.tagId)+'</span></h3></div>'
+      + (n.revokedAt ? '<span class="tag tag-crit" style="margin-left:auto">unieważniony '+esc(fmtDT(n.revokedAt))+'</span>' : "")
+      + '</div><div class="panel-b">'
+      + (zgasl
+        ? '<p class="small muted">Pod tym identyfikatorem nikt już nie odczyta karty. Nośnik zostaje na liście jako nagrobek: ratownik, który go zbliży, ma zobaczyć „unieważniony", a nie „nie ma takiej karty".</p>'
+        : '<div class="qrbox">'
+          + (base ? qrSvg(url, "Kod QR z adresem karty " + CARD.tagId) : "")
+          + '<div><label class="f">Adres zapisywany w nośniku<input class="mono" data-url readonly value="'+esc(url)+'"></label>'
+          +   '<p class="tiny muted" style="margin-top:.5rem">Kod QR niesie ten sam adres. Działa tam, gdzie NFC nie: na telefonie bez czytnika, na iOS i po wydrukowaniu.</p></div>'
+          + '</div>'
+          + '<div class="row" style="margin-top:.8rem">'
+          +   '<button class="btn btn-primary btn-sm" data-act="zapisz"'+(mozeZapisac?"":" disabled")+'>Zapisz na tym nośniku</button>'
+          +   '<button class="btn btn-sm" data-act="sprawdz"'+(nfcReady()?"":" disabled")+'>Sprawdź, co jest w nośniku</button>'
+          +   '<button class="btn btn-sm" data-act="kopiuj">Skopiuj adres</button>'
+          +   (ROLE === "pacjent" ? '<button class="btn btn-crit btn-sm" data-act="zgas">Zgubiony — unieważnij</button>' : "")
+          + '</div>')
+      + '</div></div>';
+    };
+
+    b.innerHTML = '<div class="stack" id="nosniki">'
     + (martwa
-        ? '<div class="notice crit"><span>Ta opaska jest unieważniona od '+esc(fmtDT(CARD.revokedAt))+'. Pod jej adresem nikt nie dostanie karty — ani ratownik, ani ty. Karta ma się znów odczytywać? Przenieś ją na nową opaskę.</span></div>'
+        ? '<div class="notice crit"><span>Ta karta jest odcięta od '+esc(fmtDT(CARD.revokedAt))+'. Żaden nośnik nie oddaje jej już do odczytu — ani ratownikowi, ani tobie. Treść karty zostaje i otwiera ją PIN.</span></div>'
         : "")
-    + '<p class="small muted">W opasce zostaje sam adres tej karty, bez danych medycznych. Kto zbliży do niej telefon, otworzy ten adres: pacjent i lekarz trafią na pytanie o PIN, każdy inny na odczyt ratunkowy.</p>'
-    + '<div class="qrbox">'
-    +   (base ? qrSvg(url, "Kod QR z adresem karty " + CARD.tagId) : "")
-    +   '<div>'
-    +     '<label class="f">Adres zapisywany w opasce<input class="mono" id="nfcUrl" readonly value="'+esc(url)+'"></label>'
-    +     '<p class="tiny muted" style="margin-top:.5rem">Kod QR niesie ten sam adres. Działa tam, gdzie NFC nie: na telefonie bez czytnika, na iOS i po wydrukowaniu. Aparat telefonu wystarczy — kod prowadzi na ten sam ekran co zbliżenie opaski.</p>'
-    +   '</div>'
-    + '</div>'
-    + '<div class="row">'
-    +   '<button class="btn btn-primary" id="nfcWrite"'+(mozeZapisac?"":" disabled")+'>Zapisz kartę na opasce</button>'
-    +   '<button class="btn" id="nfcCheck"'+(nfcReady()?"":" disabled")+'>Sprawdź, co jest na opasce</button>'
-    +   '<button class="btn btn-sm" id="nfcCopy">Skopiuj adres</button>'
-    +   '<button class="btn btn-sm" id="doWydruku">Wydrukuj kartę do portfela</button>'
-    + '</div>'
-    + '<div id="nfcOut"></div>'
-    + (nfcReady() ? '' : '<div class="notice warn"><span>Ta przeglądarka nie udostępnia Web NFC — zapis działa dziś w Chrome na Androidzie, na stronie otwartej przez HTTPS. Na innym sprzęcie zapisz powyższy adres w opasce dowolną aplikacją do NFC, jako rekord typu URL.</span></div>')
-    + (base ? '' : '<div class="notice warn"><span>Strona jest otwarta z pliku, więc adres nie ma nazwy serwera i telefon ratownika go nie otworzy. Uruchom aplikację przez <span class="mono">npm start</span> albo wystaw ją pod adresem HTTPS.</span></div>')
-    + (API ? '' : '<div class="notice"><span>Karta leży w pamięci tej przeglądarki, nie na serwerze. Opaska zaprowadzi pod ten adres każdy telefon, ale kartę znajdzie pod nim tylko ta przeglądarka. Opaska, która ma zadziałać u ratownika, wymaga serwera HERO.</span></div>')
-    + '<details><summary class="small muted" style="cursor:pointer">Opaska zapisana na stałe</summary>'
-    +   '<p class="small muted" style="margin:.6rem 0">Opaskę można zablokować przed nadpisaniem. Operacji nie da się cofnąć: zablokowanej opaski nie przypiszesz już do innej karty.</p>'
-    +   '<button class="btn btn-sm" id="nfcLock"'+(nfcReady()?"":" disabled")+'>Zabezpiecz opaskę przed zapisem</button>'
-    + '</details>'
-    /* Unieważnienie i przeniesienie zmieniają los całej karty, więc zostają przy pacjencie — tak samo
-       jak usunięcie karty, którego lekarz też nie ma. */
-    + (ROLE === "pacjent"
-      ? '<details'+(martwa?" open":"")+'><summary class="small muted" style="cursor:pointer">Zgubiona opaska</summary>'
-        + '<p class="small muted" style="margin:.6rem 0">Sam identyfikator z opaski otwiera odczyt ratunkowy, więc zgubiona opaska zostaje kluczem do zestawu krytycznego. Unieważnienie odcina ten adres na zawsze: karta zostaje, ale pod starym identyfikatorem nikt jej nie odczyta. Przeniesienie robi to samo i od razu daje karcie nową opaskę — historia odczytów zostaje przy starej.</p>'
-        + (martwa ? "" : '<div class="row" style="margin-bottom:1rem"><button class="btn btn-crit btn-sm" id="revoke">Unieważnij tę opaskę</button></div>')
-        + '<form id="fMove" class="stack" style="max-width:340px">'
-        +   '<label class="f">PIN karty<input type="password" name="pin" inputmode="numeric" required placeholder="ten sam PIN"></label>'
-        +   '<button class="btn btn-primary btn-sm" type="submit">Przenieś kartę na nową opaskę</button>'
-        +   '<p class="tiny muted">Nowy identyfikator wymaga skrótu PIN-u przeliczonego dla niego, dlatego pytamy o PIN jeszcze raz. Sam PIN się nie zmienia.</p>'
-        +   '<p id="moveErr" class="tiny" style="color:var(--crit)"></p>'
+    + '<p class="small muted">Nośnik niesie sam adres tej karty, bez danych medycznych. Kto go zbliży, otworzy ten adres: bez konta zobaczy zestaw ratunkowy, konto lekarza albo ratownika otworzy kartę w całości, a ty wejdziesz do niej PIN-em. Jedną kartę można nosić na kilku rzeczach naraz — opaska na ręku, brelok przy kluczach, karta w portfelu.</p>'
+    + lista.map(panelNos).join("")
+    + (ROLE === "pacjent" && !martwa
+      ? '<div class="panel"><div class="panel-h"><h3>Dodaj nośnik</h3></div><div class="panel-b">'
+        + '<form id="fNos" class="row">'
+        +   '<label class="f" style="flex:1 1 180px">Rodzaj<select name="kind">'+KIND.map(([k,l]) => '<option value="'+k+'">'+esc(l)+'</option>').join("")+'</select></label>'
+        +   '<label class="f" style="flex:2 1 220px">Opis dla ciebie<input name="label" maxlength="60" placeholder="brelok do kluczy"></label>'
+        +   '<button class="btn btn-primary" type="submit">Dodaj nośnik</button>'
         + '</form>'
+        + '<p id="nosErr" class="tiny" style="color:var(--crit)"></p>'
+        + '<p class="tiny muted" style="margin-top:.6rem">Nowy nośnik dostaje własny identyfikator i prowadzi do tej samej karty. PIN zostaje ten sam, bo wiąże się z kartą, nie z nośnikiem. Zgubiony nośnik unieważnia się osobno — pozostałe działają dalej.</p>'
+        + '</div></div>'
+      : "")
+    + '<div id="nfcOut"></div>'
+    + (nfcReady() ? '' : '<div class="notice warn"><span>Ta przeglądarka nie udostępnia Web NFC — zapis działa dziś w Chrome na Androidzie, na stronie otwartej przez HTTPS. Na innym sprzęcie zapisz adres nośnika dowolną aplikacją do NFC, jako rekord typu URL.</span></div>')
+    + (base ? '' : '<div class="notice warn"><span>Strona jest otwarta z pliku, więc adres nie ma nazwy serwera i telefon ratownika go nie otworzy. Uruchom aplikację przez <span class="mono">npm start</span> albo wystaw ją pod adresem HTTPS.</span></div>')
+    + (API ? '' : '<div class="notice"><span>Karta leży w pamięci tej przeglądarki, nie na serwerze. Nośnik zaprowadzi pod ten adres każdy telefon, ale kartę znajdzie pod nim tylko ta przeglądarka. Nośnik, który ma zadziałać u ratownika, wymaga serwera HERO.</span></div>')
+    + '<div class="row"><button class="btn btn-sm" id="doWydruku">Wydrukuj kartę do portfela</button></div>'
+    + '<details><summary class="small muted" style="cursor:pointer">Nośnik zapisany na stałe</summary>'
+    +   '<p class="small muted" style="margin:.6rem 0">Opaskę albo brelok można zablokować przed nadpisaniem. Operacji nie da się cofnąć: zablokowanego nośnika nie przypiszesz już do innej karty.</p>'
+    +   '<button class="btn btn-sm" id="nfcLock"'+(nfcReady()?"":" disabled")+'>Zabezpiecz nośnik przed zapisem</button>'
+    + '</details>'
+    /* Odcięcie całej karty zmienia jej los, więc zostaje przy pacjencie — tak samo jak usunięcie
+       karty, którego lekarz też nie ma. Zgubiony pojedynczy nośnik gaśnie przyciskiem przy nim. */
+    + (ROLE === "pacjent" && !martwa
+      ? '<details><summary class="small muted" style="cursor:pointer">Odetnij całą kartę</summary>'
+        + '<p class="small muted" style="margin:.6rem 0">Zgubiłeś jeden nośnik? Unieważnij właśnie jego — reszta działa dalej. Odcięcie całej karty gasi wszystkie nośniki naraz: pod żadnym identyfikatorem nikt jej nie odczyta, a operacji nie da się cofnąć. Treść karty i historia odczytów zostają, otwiera je PIN.</p>'
+        + '<button class="btn btn-crit btn-sm" id="revoke">Odetnij całą kartę</button>'
         + '</details>'
       : "")
     + '</div>';
 
     const out = document.getElementById("nfcOut");
     const info = (cls, txt) => { out.innerHTML = '<div class="notice '+cls+'"><span>'+esc(txt)+'</span></div>'; };
-    document.getElementById("nfcCopy").addEventListener("click", async () => {
-      try { await navigator.clipboard.writeText(url); toast("Adres skopiowany"); }
-      catch(e){ document.getElementById("nfcUrl").select(); toast("Skopiuj zaznaczony adres"); }
-    });
-    if(mozeZapisac){
-      document.getElementById("nfcWrite").addEventListener("click", async () => {
-        info("", "Przyłóż opaskę do telefonu i przytrzymaj chwilę…");
+
+    document.getElementById("nosniki").addEventListener("click", async e => {
+      const btn = e.target.closest("[data-act]");
+      if(!btn) return;
+      const panel = btn.closest("[data-nos]");
+      const tag = panel.dataset.nos;
+      const pole = panel.querySelector("[data-url]");
+      const url = pole ? pole.value : "";
+      const rodzaj = (lista.find(n => n.tagId === tag) || {}).kind;
+      if(btn.dataset.act === "kopiuj"){
+        try { await navigator.clipboard.writeText(url); toast("Adres skopiowany"); }
+        catch(err){ pole.select(); toast("Skopiuj zaznaczony adres"); }
+        return;
+      }
+      if(btn.dataset.act === "zapisz"){
+        info("", "Przyłóż " + kindBier(rodzaj) + " do telefonu i przytrzymaj chwilę…");
         const r = await nfcWrite(url);
         if(!r.ok) return info("crit", r.error);
-        info("ok", "Opaska zapisana. Od teraz zbliżenie telefonu otwiera kartę " + CARD.tagId + ".");
-        toast("Opaska zapisana");
-      });
-    }
-    if(nfcReady()){
-      document.getElementById("nfcCheck").addEventListener("click", async () => {
-        info("", "Przyłóż opaskę do telefonu…");
+        info("ok", "Zapisane. Od teraz zbliżenie otwiera kartę " + CARD.tagId + ".");
+        toast("Nośnik zapisany");
+        return;
+      }
+      if(btn.dataset.act === "sprawdz"){
+        info("", "Przyłóż nośnik do telefonu…");
         const r = await nfcScan(znaleziony => {
           nfcStop();
-          if(!znaleziony) return info("warn", "W opasce nie ma adresu karty HERO. Zapis ją przypisze.");
-          if(znaleziony === CARD.tagId) return info("ok", "W opasce jest ta karta: " + znaleziony + ".");
-          info("warn", "W opasce jest inna karta: " + znaleziony + ". Zapis nadpisze ten adres.");
+          if(!znaleziony) return info("warn", "Nie ma tam adresu karty HERO. Zapis go przypisze.");
+          if(znaleziony === tag) return info("ok", "To ten nośnik: " + znaleziony + ".");
+          info("warn", "Tam jest inny adres: " + znaleziony + ". Zapis go nadpisze.");
         });
         if(!r.ok) info("crit", r.error);
-      });
+        return;
+      }
+      if(btn.dataset.act === "zgas"){
+        if(!confirm("Unieważnić nośnik " + tag + "? Pod tym identyfikatorem nikt już nie odczyta karty, a operacji nie da się cofnąć.")) return;
+        const r = await store.revokeCarrier(CARD.tagId, tag);
+        if(!r.ok){ info("crit", r.error); return; }
+        CARD.carriers = r.carriers;
+        toast("Nośnik unieważniony");
+        renderEditor();
+      }
+    });
+
+    if(nfcReady()){
       document.getElementById("nfcLock").addEventListener("click", async () => {
-        if(!confirm("Zabezpieczyć opaskę przed zapisem? Adresu na niej nie da się już potem zmienić.")) return;
-        info("", "Przyłóż opaskę do telefonu…");
+        if(!confirm("Zabezpieczyć nośnik przed zapisem? Adresu na nim nie da się już potem zmienić.")) return;
+        info("", "Przyłóż nośnik do telefonu…");
         const r = await nfcLock();
-        info(r.ok ? "ok" : "crit", r.ok ? "Opaska zabezpieczona — zapisanego adresu nie da się już zmienić." : r.error);
+        info(r.ok ? "ok" : "crit", r.ok ? "Nośnik zabezpieczony — zapisanego adresu nie da się już zmienić." : r.error);
       });
     }
 
@@ -1505,38 +1612,29 @@ async function renderTab(){
       renderPrint(CARD, () => renderEditor());
     });
 
-    const przyciskRevoke = document.getElementById("revoke");
-    if(przyciskRevoke) przyciskRevoke.addEventListener("click", async () => {
-      if(!confirm("Unieważnić opaskę " + CARD.tagId + "? Pod tym adresem nikt już nie odczyta karty, a operacji nie da się cofnąć.")) return;
-      const r = await store.revoke(CARD.tagId);
-      if(!r.ok){ info("crit", r.error); return; }
-      CARD.revokedAt = r.revokedAt;
-      toast("Opaska unieważniona");
+    const formNos = document.getElementById("fNos");
+    if(formNos) formNos.addEventListener("submit", async ev => {
+      ev.preventDefault();
+      const f = ev.target;
+      const r = await store.addCarrier(CARD.tagId, {tagId: genTag(), kind: f.kind.value, label: f.label.value.trim()});
+      if(!r.ok){ formErr("nosErr", r.error); return; }
+      CARD.carriers = r.carriers;
+      toast(kindName(f.kind.value) + " dodana do karty");
       renderEditor();
     });
 
-    const formMove = document.getElementById("fMove");
-    if(formMove) formMove.addEventListener("submit", async ev => {
-      ev.preventDefault();
-      const pin = ev.target.pin.value;
-      const stary = CARD.tagId;
-      /* Skrót liczymy z PIN-u na miejscu: bez serwera nikt tego nie sprawdzi, a karty nie wolno
-         zostawić w połowie drogi. */
-      if(PIN_DG && await digest(stary, pin) !== PIN_DG){ formErr("moveErr", "Nieprawidłowy PIN."); return; }
-      const nowy = genTag();
-      const dgNowy = await digest(nowy, pin);
-      const r = await store.move(stary, nowy, dgNowy);
-      if(!r.ok){ formErr("moveErr", r.error); return; }
-      PIN_DG = dgNowy;
-      CARD = r.card;
-      ses.set({tagId:nowy, role:ROLE, dg:PIN_DG});
-      forgetOwner(stary);
-      markOwner(nowy, CARD.person && CARD.person.name);
-      toast("Karta przeniesiona na nową opaskę");
+    const przyciskRevoke = document.getElementById("revoke");
+    if(przyciskRevoke) przyciskRevoke.addEventListener("click", async () => {
+      if(!confirm("Odciąć całą kartę " + CARD.tagId + "? Żaden nośnik nie odda jej już do odczytu, a operacji nie da się cofnąć.")) return;
+      const r = await store.revoke(CARD.tagId);
+      if(!r.ok){ info("crit", r.error); return; }
+      CARD.revokedAt = r.revokedAt;
+      toast("Karta odcięta");
       renderEditor();
     });
     return;
   }
+
 
   if(TAB === "historia"){
     if(PIN_DG){
@@ -1657,11 +1755,11 @@ async function renderCardView(){
   const znane = lsOwners().slice().reverse();
   view.innerHTML = '<div class="stack" style="max-width:900px;margin-inline:auto">'
   + '<div><p class="eyebrow">Rola: pacjent</p><h1 style="font-size:2rem">Moja karta</h1>'
-  + '<p class="muted" style="margin-top:.5rem">Identyfikator opaski i PIN otwierają kartę do edycji. Ratownikowi wystarczy sam identyfikator — PIN chroni edycję, nie odczyt ratunkowy.</p></div>'
+  + '<p class="muted" style="margin-top:.5rem">Identyfikator z nośnika i PIN otwierają kartę do edycji. Ratownikowi wystarczy sam identyfikator — PIN chroni edycję, nie odczyt ratunkowy.</p></div>'
   /* Identyfikator ma 128 bitów losowości, więc nikt go z pamięci nie wpisze: karty otwierane
      na tym urządzeniu trzymamy na liście, a pełny identyfikator i tak zostaje w opasce. */
   + (znane.length
-      ? '<div class="panel"><div class="panel-h"><h3>Opaski znane tej przeglądarce</h3>'
+      ? '<div class="panel"><div class="panel-h"><h3>Karty znane tej przeglądarce</h3>'
         + '<span class="tiny muted" style="margin-left:auto">otwierane tu PIN-em pacjenta</span></div>'
         + '<div class="panel-b" id="znane">'
         + znane.map(o => '<div class="rec" data-tag="'+esc(o.tag)+'"><div class="main">'
@@ -1674,17 +1772,19 @@ async function renderCardView(){
       : "")
   + '<div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(280px,1fr));align-items:start">'
   + '<div class="panel"><div class="panel-h"><h3>Otwórz istniejącą kartę</h3></div><div class="panel-b"><form id="fOpen" class="stack">'
-  +   '<label class="f">Identyfikator opaski<input class="mono" name="tag" required placeholder="identyfikator z opaski"></label>'
+  +   '<label class="f">Identyfikator z nośnika<input class="mono" name="tag" required placeholder="z opaski, breloka albo karty"></label>'
   +   '<label class="f">PIN<input type="password" name="pin" inputmode="numeric" required placeholder="4–6 cyfr"></label>'
   +   '<button class="btn btn-primary" type="submit">Otwórz kartę</button><p id="openErr" class="tiny" style="color:var(--crit)"></p></form></div></div>'
   + '<div class="panel"><div class="panel-h"><h3>Załóż nową kartę</h3></div><div class="panel-b"><form id="fNew" class="stack">'
   +   '<label class="f">Imię i nazwisko<input name="name" required placeholder="Jan Kowalski"></label>'
   +   '<label class="f">PIN do edycji<input type="password" name="pin" inputmode="numeric" minlength="4" maxlength="6" required placeholder="4–6 cyfr"></label>'
   +   '<label class="f">Powtórz PIN<input type="password" name="pin2" inputmode="numeric" required></label>'
+  +   '<label class="f">Co nosi pacjent<select name="kind">'+KIND.map(([k,l]) => '<option value="'+k+'">'+esc(l)+'</option>').join("")+'</select></label>'
+  +   '<p class="tiny muted">Opaska trzyma się nadgarstka i nie gubi — dlatego trafia do osób starszych i do dzieci. Brelok wisi przy kluczach. Kolejne nośniki dołożysz w karcie; wszystkie prowadzą do tej samej treści.</p>'
   +   '<button class="btn btn-primary" type="submit">Utwórz kartę</button><p id="newErr" class="tiny" style="color:var(--crit)"></p></form></div></div>'
   + '</div>'
   + '<div class="notice"><span>Prototyp: ' + (API
-      ? 'karta zapisuje się w bazie serwera HERO, a jej zestaw krytyczny odczyta każdy, kto zna identyfikator opaski. Nie wprowadzaj danych, których nie chcesz tam zostawić.'
+      ? 'karta zapisuje się w bazie serwera HERO, a jej zestaw ratunkowy odczyta każdy, kto zna identyfikator z nośnika. Nie wprowadzaj danych, których nie chcesz tam zostawić.'
       : 'dane tej karty zostają w pamięci tej przeglądarki i nie są wysyłane na serwer. Nie wprowadzaj danych, których nie chcesz tu zostawić.')
     + ' Kartę można usunąć jednym przyciskiem.</span></div>'
   + '</div>';
@@ -1703,7 +1803,11 @@ async function renderCardView(){
 
   document.getElementById("fOpen").addEventListener("submit", async e => {
     e.preventDefault(); const f = e.target;
-    const tag = f.tag.value.trim().toUpperCase();
+    /* Pacjent przepisuje identyfikator z tego, co ma pod ręką — a to może być brelok wskazujący
+       na kartę o innym adresie własnym. PIN wiąże się z kartą, więc najpierw rozwiązujemy nośnik. */
+    const wpisany = f.tag.value.trim().toUpperCase();
+    const cel = await store.resolve(wpisany);
+    const tag = cel ? cel.tagId : wpisany;
     const r = await store.verify(tag, f.pin.value);
     if(!r.ok){ formErr("openErr", r.reason === "pin" ? "Nieprawidłowy PIN." : "Nie ma karty o tym identyfikatorze."); return; }
     markOwner(tag, r.card.person && r.card.person.name);
@@ -1715,10 +1819,17 @@ async function renderCardView(){
     const tag = genTag(); const c = blankCard(tag);
     c.person.name = f.name.value.trim();
     c.pinHash = await digest(tag, f.pin.value);
+    /* Adres własny karty jest zarazem jej pierwszym nośnikiem — rodzaj wybiera pacjent tutaj. */
+    c.carrier = {kind: f.kind.value, label: ""};
+    if(!API){
+      const nos = lsCarriers();
+      nos[tag] = {tagId:tag, cardId:tag, kind:f.kind.value, label:"", createdAt:nowISO(), revokedAt:null};
+      lsCarriersSave(nos);
+    }
     PIN_DG = c.pinHash;
     CARD = c; ROLE = "pacjent";
-    /* Karta bez opaski jest tylko adresem, więc zaraz po założeniu wchodzimy w jej zapis. */
-    TAB = "opaska";
+    /* Karta bez nośnika jest tylko adresem, więc zaraz po założeniu wchodzimy w jego zapis. */
+    TAB = "nosniki";
     const zapisana = await store.save(c);
     if(zapisana && zapisana.tagId) CARD = zapisana;
     markOwner(tag, c.person.name); ses.set({tagId:tag, role:"pacjent", dg:PIN_DG});
@@ -1834,7 +1945,7 @@ async function renderDoctorView(){
       : "Sam identyfikator otwiera kartę do odczytu. PIN pacjenta jest potrzebny dopiero do edycji: wpisy, które dodasz, zostaną podpisane twoim kontem.") + '</p></div>'
   + docBar()
   + '<div class="panel"><div class="panel-b"><form id="fDoc" class="stack">'
-  +   '<label class="f">Identyfikator opaski<input class="mono" name="tag" required placeholder="identyfikator z opaski"></label>'
+  +   '<label class="f">Identyfikator z nośnika<input class="mono" name="tag" required placeholder="z opaski, breloka albo karty"></label>'
   +   (ratownik ? "" : '<label class="f">Kod dostępu (PIN pacjenta) — zostaw pusty, żeby tylko odczytać<input type="password" name="pin" inputmode="numeric"></label>')
   +   '<button class="btn btn-primary" type="submit">Otwórz kartę pacjenta</button><p id="docErr" class="tiny" style="color:var(--crit)"></p>'
   + '</form></div></div>'
@@ -1843,10 +1954,12 @@ async function renderDoctorView(){
   wireDocBar();
   document.getElementById("fDoc").addEventListener("submit", async e => {
     e.preventDefault(); const f = e.target;
-    const tag = f.tag.value.trim().toUpperCase();
+    const wpisany = f.tag.value.trim().toUpperCase();
     const pin = f.pin ? f.pin.value : "";
-    /* Bez PIN-u konto idzie tą samą drogą co po zbliżeniu opaski: pełna karta do odczytu. */
-    if(!pin){ location.hash = "#/t/" + encodeURIComponent(tag); return; }
+    /* Bez PIN-u konto idzie tą samą drogą co po zbliżeniu nośnika: pełna karta do odczytu. */
+    if(!pin){ location.hash = "#/t/" + encodeURIComponent(wpisany); return; }
+    const cel = await store.resolve(wpisany);
+    const tag = cel ? cel.tagId : wpisany;
     const r = await store.verify(tag, pin);
     if(!r.ok){ formErr("docErr", r.reason === "pin" ? "Nieprawidłowy kod dostępu." : "Nie ma karty o tym identyfikatorze."); return; }
     const entry = await store.logRead(tag, kontoOpis(DOCTOR), "dostęp lekarza");
@@ -1922,12 +2035,12 @@ function renderPrint(card, wroc){
 }
 
 /* ---------------- opaska: ekran po zbliżeniu ---------------- */
-/** Przełącznik roli. Adres w opasce jest jeden, więc rolę trzeba dać się zmienić ręcznie. */
+/** Przełącznik roli. Adres w nośniku jest jeden, więc rolę trzeba dać się zmienić ręcznie. */
 function roleBar(tagId, biezaca){
   const b = (k, etykieta) => '<a class="btn btn-sm'+(biezaca===k?" btn-primary":"")+'" href="#/t/'+encodeURIComponent(tagId)+'?rola='+k+'">'+etykieta+'</a>';
   /* „ratownik" to wejście bez konta — zestaw ratunkowy. Konto zawodowe otwiera kartę w całości. */
   return '<div class="panel"><div class="panel-h">'
-  + '<div><p class="eyebrow">Opaska <span class="tagid">'+esc(tagId)+'</span></p><h3>Kto zbliżył opaskę?</h3></div>'
+  + '<div><p class="eyebrow">Nośnik <span class="tagid">'+esc(tagId)+'</span></p><h3>Kto go zbliżył?</h3></div>'
   + '<div class="row" style="margin-left:auto">'+b("ratownik","Bez konta")+b("lekarz","Konto zawodowe")+b("pacjent","To moja karta")+'</div>'
   + '</div></div>';
 }
@@ -1942,7 +2055,7 @@ function tagGate(tagId, rola){
   + '<div class="panel-b"><form id="fTag" class="stack">'
   +   '<p class="small muted">'+(doc
         ? "Karta otwiera się PIN-em pacjenta. Otwarcie trafi do historii razem z twoim nazwiskiem i numerem PWZ, a twoje wpisy dostaną twój podpis."
-        : "PIN otwiera kartę do edycji. Ratownikowi wystarczy sam identyfikator opaski — PIN chroni edycję, nie odczyt ratunkowy.")+'</p>'
+        : "PIN otwiera kartę do edycji. Ratownikowi wystarczy sam identyfikator z nośnika — PIN chroni edycję, nie odczyt ratunkowy.")+'</p>'
   +   '<label class="f">'+(doc ? "Kod dostępu (PIN pacjenta)" : "PIN")+'<input type="password" name="pin" inputmode="numeric" required></label>'
   +   '<button class="btn btn-primary" type="submit">Otwórz kartę</button><p id="tagErr" class="tiny" style="color:var(--crit)"></p>'
   + '</form></div></div></div>';
@@ -1967,7 +2080,7 @@ async function tagReadout(tagId){
   const card = await store.get(tagId);
   if(!card){
     view.innerHTML = '<div class="stack" style="max-width:760px;margin-inline:auto">' + roleBar(tagId, "ratownik")
-    + '<div class="notice crit"><span>Opaska <b class="tagid">'+esc(tagId)+'</b> wskazuje kartę, której nie ma '
+    + '<div class="notice crit"><span>Nośnik <b class="tagid">'+esc(tagId)+'</b> wskazuje kartę, której nie ma '
     + (API ? "w bazie tego serwera." : "w pamięci tej przeglądarki.") + ' Karta mogła zostać usunięta.</span></div></div>';
     return;
   }
@@ -1980,7 +2093,8 @@ async function tagReadout(tagId){
   const zKontem = !!(DOCTOR && (API || DOCTOR.token === null));
   const entry = (API && DOCTOR)
     ? ((card.reads || [])[0] || {at: nowISO(), by: kontoOpis(DOCTOR)})
-    : await store.logRead(tagId, zKontem ? kontoOpis(DOCTOR) : "odczyt po zbliżeniu opaski",
+    : await store.logRead(tagId, zKontem ? kontoOpis(DOCTOR)
+        : "odczyt po zbliżeniu " + kindDop(card.carrier && card.carrier.kind),
         zKontem ? readCtx(DOCTOR) : "odczyt ratunkowy");
   view.innerHTML = '<div class="stack">' + roleBar(tagId, DOCTOR ? "lekarz" : "ratownik")
   + (card.rescue
@@ -2003,26 +2117,30 @@ async function tagReadout(tagId){
  */
 async function renderTagLanding(tagId, params){
   if(!TAG_RE.test(tagId)){
-    view.innerHTML = '<div class="notice crit"><span>Adres z opaski nie niesie poprawnego identyfikatora karty.</span></div>';
+    view.innerHTML = '<div class="notice crit"><span>Adres z nośnika nie niesie poprawnego identyfikatora karty.</span></div>';
     return;
   }
-  view.innerHTML = '<p class="muted">Otwieram kartę z opaski…</p>';
+  view.innerHTML = '<p class="muted">Otwieram kartę z nośnika…</p>';
   await doctors.restore();
+  /* Identyfikator z nośnika prowadzi do karty, której adres własny bywa inny — skrót PIN-u wiąże
+     się z adresem karty, więc wejścia po PIN-ie zaczynają się od rozwiązania nośnika. */
+  const cel = await store.resolve(tagId);
+  const cardId = cel ? cel.tagId : tagId;
   const s = ses.get();
   const rola = params.get("rola");
-  const wybor = rola || (s && s.tagId === tagId && s.dg ? s.role : isOwner(tagId) ? "pacjent" : DOCTOR ? "lekarz" : "ratownik");
+  const wybor = rola || (s && s.tagId === cardId && s.dg ? s.role : isOwner(cardId) ? "pacjent" : DOCTOR ? "lekarz" : "ratownik");
 
   /* Otwarta sesja tej samej roli wchodzi do karty bez pytania o PIN drugi raz. */
-  if((wybor === "pacjent" || wybor === "lekarz") && s && s.tagId === tagId && s.role === wybor && s.dg){
-    const r = await store.openWithDigest(tagId, s.dg);
+  if((wybor === "pacjent" || wybor === "lekarz") && s && s.tagId === cardId && s.role === wybor && s.dg){
+    const r = await store.openWithDigest(cardId, s.dg);
     if(r.ok){ CARD = r.card; ROLE = wybor; TAB = "podstawowe"; renderEditor(); return; }
     ses.clear();
   }
   /* Konto zawodowe nie pyta o PIN, żeby zobaczyć kartę: nieprzytomny pacjent go nie poda. PIN
      zostaje przy edycji, i po to jest osobne wejście „edycja". */
   if((wybor === "lekarz" || wybor === "edycja") && !DOCTOR) return renderDoctorAuth(route);
-  if(wybor === "edycja") return tagGate(tagId, "lekarz");
-  if(wybor === "pacjent") return tagGate(tagId, "pacjent");
+  if(wybor === "edycja") return tagGate(cardId, "lekarz");
+  if(wybor === "pacjent") return tagGate(cardId, "pacjent");
   return tagReadout(tagId);
 }
 
