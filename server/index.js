@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 import { networkInterfaces } from "node:os";
 import { join, normalize, extname, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { openDatabase, READ_CTX } from "./db.js";
+import { openDatabase, READ_CTX, readCtxFor } from "./db.js";
 import { DoctorStore } from "./doctors.js";
 import { rateLimiter } from "./limit.js";
 
@@ -103,7 +103,10 @@ export function createServer(store = openDatabase(),
     }
 
     try {
-      const doctor = () => store.doctors.bySession(req.headers["x-hero-doctor"]);
+      /* Konto zawodowe z tokenu: lekarz albo ratownik. Otwiera pełną kartę do odczytu. */
+      const konto = () => store.doctors.bySession(req.headers["x-hero-doctor"]);
+      /* Podpis pod wpisem bierze się wyłącznie z konta lekarza — ratownik karty nie redaguje. */
+      const doctor = () => { const k = konto(); return k && k.role === "lekarz" ? k : null; };
 
       if (path === "/api/health") {
         return send(res, 200, { service: "hero", version: 2, cards: store.cards.count(), doctors: store.doctors.count() });
@@ -129,13 +132,13 @@ export function createServer(store = openDatabase(),
         return fail(res, 405, "Nieobsługiwana metoda");
       }
       if (path === "/api/doctors/me" && req.method === "GET") {
-        const kto = doctor();
+        const kto = konto();
         return kto ? send(res, 200, { ...kto, sessions: store.doctors.sessions(kto.id) })
-                   : fail(res, 403, "Nieznana albo wygasła sesja lekarza");
+                   : fail(res, 403, "Nieznana albo wygasła sesja konta");
       }
       if (path === "/api/doctors/sessions" && req.method === "DELETE") {
-        const kto = doctor();
-        if (!kto) return fail(res, 403, "Nieznana albo wygasła sesja lekarza");
+        const kto = konto();
+        if (!kto) return fail(res, 403, "Nieznana albo wygasła sesja konta");
         store.doctors.logoutAll(kto.id);
         return send(res, 204);
       }
@@ -197,21 +200,36 @@ export function createServer(store = openDatabase(),
         const uniewazniona = store.cards.revokedAt(tagId);
         if (uniewazniona) return send(res, 410, { error: "Opaska unieważniona", revokedAt: uniewazniona });
         const body = await readJson(req);
-        /* Dostęp lekarza opisuje jego konto, nie pole z formularza — i tylko konto może go zapisać. */
-        const kto = doctor();
-        if (body.ctx === READ_CTX[1] && !kto) return fail(res, 403, "Wpis o dostępie lekarza wymaga konta lekarza");
+        /* Dostęp zawodowy opisuje konto, nie pole z formularza — i tylko konto może go zapisać. */
+        const kto = konto();
+        if (!kto && READ_CTX.slice(1).includes(str(body.ctx))) {
+          return fail(res, 403, "Wpis o dostępie zawodowym wymaga konta lekarza albo ratownika");
+        }
         const entry = kto
-          ? store.cards.addRead(tagId, DoctorStore.label(kto), READ_CTX[1])
+          ? store.cards.addRead(tagId, DoctorStore.label(kto), readCtxFor(kto.role))
           : store.cards.addRead(tagId, body.by, body.ctx);
         return entry ? send(res, 201, entry) : fail(res, 404, "Nie ma karty o tym identyfikatorze");
       }
 
       if (req.method === "GET") {
-        const card = store.cards.publicCard(tagId);
+        /**
+         * Dwa poziomy odczytu. Bez konta wychodzi sam zestaw ratunkowy: to, co ratuje życie, bez
+         * nazwiska, daty urodzenia i kontaktów alarmowych — bo identyfikator opaski ma każdy, kto ją
+         * znalazł. Konto zawodowe (lekarz albo ratownik) dostaje kartę w całości, a jego odczyt
+         * zapisuje się w historii z nazwiskiem i numerem: nie da się zajrzeć bez śladu.
+         */
+        const kto = konto();
+        const card = kto ? store.cards.fullCard(tagId) : store.cards.rescueCard(tagId);
         if (!card) return fail(res, 404, "Nie ma karty o tym identyfikatorze");
         /* Stary adres mówi, że opaska jest odcięta. Ratownik ma wiedzieć, że trafił na unieważnioną
            opaskę, a nie na zepsuty serwis — dlatego 410, nie 404. */
         if (card.revokedAt) return send(res, 410, { error: "Opaska unieważniona", revokedAt: card.revokedAt });
+        if (kto) {
+          /* Ten sam licznik co przy zapisie śladu: wgląd w karty też nie może lecieć bez końca. */
+          if (!reads.allow(req.socket.remoteAddress || "?")) return fail(res, 429, "Za dużo odczytów z tego adresu");
+          store.cards.addRead(tagId, DoctorStore.label(kto), readCtxFor(kto.role));
+          card.reads = store.cards.reads(tagId);
+        }
         return send(res, 200, card);
       }
       if (req.method === "PUT") {

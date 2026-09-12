@@ -1,11 +1,12 @@
 # Plan rozwoju
 
 Kolejność wynika z zależności: bez trwałych identyfikatorów nie ma sensu wypuszczać opasek,
-bez kont lekarzy nie ma sensu obiecywać weryfikacji wpisów.
+bez kont zawodowych nie ma sensu obiecywać weryfikacji wpisów.
 
 ## 1. Zamknięcie prototypu (stan obecny)
 
-Zrobione: model karty, trzy role, odczyt ratunkowy z audytem, API na SQLite, testy.
+Zrobione: model karty, role, dwa zakresy odczytu (zestaw ratunkowy bez konta, cała karta z kontem
+zawodowym), audyt odczytów, API na SQLite, testy.
 
 ## 2. Poprawki do zamknięcia od razu
 
@@ -20,10 +21,11 @@ przy kontach lekarzy lista kart będzie w ogóle potrzebna.
 
 **Podpis źródła — zrobione.** Serwer nie przyjmuje `source: "lekarz"` z żądania: wpis zachowuje
 podpis tylko wtedy, gdy leżał z nim w bazie i nie zmienił treści (`server/db.js`). Podpis powstaje
-wyłącznie z konta lekarza (punkt 4) i niesie jego numer PWZ.
+wyłącznie z konta lekarza (punkt 4) i niesie jego numer PWZ; konto ratownika medycznego wpisów nie
+podpisuje, bo ich nie dodaje.
 
-**Ślad odczytu — częściowo zrobione.** Kontekst wpisu nadaje serwer z zamkniętej listy, dostęp
-lekarza wymaga konta lekarza, żądania z jednego adresu tnie limit (30 na minutę, licznik w pamięci
+**Ślad odczytu — częściowo zrobione.** Kontekst wpisu nadaje serwer z zamkniętej listy i z roli
+konta, dostęp lekarza albo ratownika wymaga konta o tej roli, żądania z jednego adresu tnie limit (30 na minutę, licznik w pamięci
 procesu), a historia karty trzyma ostatnie 200 wpisów. Zostaje opis czytnika, który przy odczycie
 ratunkowym nadal jest deklaracją klienta: potwierdzi go dopiero uwierzytelnienie czytnika (punkt 4).
 Sam limit trzeba przenieść na wspólny magazyn, gdy serwer przestanie być jedną instancją.
@@ -48,18 +50,24 @@ Zostaje:
   identyfikatorem i zostawia nagrobek — działa, ale historia odczytów zostaje przy starej opasce,
   a nie przy pacjencie.
 
-## 4. Konta lekarzy
+## 4. Konta zawodowe: lekarz i ratownik medyczny
 
-Zrobione: konto z numerem PWZ i hasłem, logowanie tokenem sesji, podpis wpisu nadawany przez serwer
-(kto, jaki numer PWZ, kiedy), dostęp lekarza w historii opisany kontem zamiast polem z formularza.
+Zrobione: konto z numerem zawodowym i hasłem, dwie role (lekarz z numerem PWZ, ratownik medyczny
+z numerem w rejestrze), logowanie tokenem sesji, podpis wpisu nadawany przez serwer (kto, jaki numer,
+kiedy), dostęp opisany kontem zamiast polem z formularza. Konto otwiera całą kartę bez PIN-u —
+nieprzytomny pacjent PIN-u nie poda — a bez konta zostaje zestaw ratunkowy, który zawęża serwer
+(`rescueCard`). Podpisuje tylko lekarz: ratownik kartę czyta, ale jej nie redaguje.
 
 Zostaje:
 
-- **weryfikacja numeru PWZ** — dziś sprawdzamy wyłącznie format, siedem cyfr. Do domknięcia: cyfra
-  kontrolna oraz sprawdzenie w rejestrze Naczelnej Izby Lekarskiej. Obie rzeczy trzeba potwierdzić przy
-  źródle, zanim zaczną odrzucać numery: błędny algorytm zablokuje prawdziwych lekarzy.
+- **weryfikacja numeru zawodowego** — dziś sprawdzamy wyłącznie format: siedem cyfr u lekarza, od
+  czterech do dwudziestu znaków u ratownika. To najsłabsze miejsce całego dostępu, bo konto otwiera
+  kartę w całości. Do domknięcia: cyfra kontrolna PWZ oraz sprawdzenie w rejestrze Naczelnej Izby
+  Lekarskiej i w rejestrze ratowników medycznych — albo potwierdzenie przez podmiot zatrudniający.
+  Obie rzeczy trzeba potwierdzić przy źródle, zanim zaczną odrzucać numery: błędny algorytm zablokuje
+  prawdziwych lekarzy i ratowników.
 - **dostęp nadawany przez pacjenta** — kod jednorazowy z terminem ważności i możliwością odebrania,
-  zamiast współdzielenia PIN-u karty.
+  dla osób, które nie mają konta zawodowego: opiekuna, rodziny, przychodni.
 - ~~cykl życia sesji~~ — zrobione: token żyje dobę od wydania, wygasły kasuje się przy pierwszym
   użyciu, a „Wyloguj wszędzie" unieważnia wszystkie tokeny konta. Do rozważenia zostaje przedłużanie
   ważności przy pracy i lista urządzeń z osobnym wylogowaniem każdego. Limit nieudanych prób

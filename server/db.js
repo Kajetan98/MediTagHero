@@ -7,7 +7,9 @@ import { DoctorStore } from "./doctors.js";
 
 const SECTIONS = ["allergies", "meds", "conditions", "contacts"];
 const READ_LIMIT = 200;
-export const READ_CTX = ["odczyt ratunkowy", "dostęp lekarza"];
+export const READ_CTX = ["odczyt ratunkowy", "dostęp lekarza", "dostęp ratownika"];
+/** Kontekst wpisu w historii dla konta danej roli. */
+export const readCtxFor = rola => (rola === "ratownik" ? READ_CTX[2] : READ_CTX[1]);
 
 export function openDatabase(file = process.env.HERO_DB || "data/hero.sqlite") {
   if (file !== ":memory:") mkdirSync(dirname(file), { recursive: true });
@@ -37,7 +39,8 @@ export function openDatabase(file = process.env.HERO_DB || "data/hero.sqlite") {
       pwz        TEXT NOT NULL UNIQUE,
       name       TEXT NOT NULL,
       pass       TEXT NOT NULL,
-      created_at TEXT NOT NULL
+      created_at TEXT NOT NULL,
+      role       TEXT NOT NULL DEFAULT 'lekarz'
     );
     CREATE TABLE IF NOT EXISTS doctor_sessions (
       token      TEXT PRIMARY KEY,
@@ -49,6 +52,9 @@ export function openDatabase(file = process.env.HERO_DB || "data/hero.sqlite") {
      istniejącej tabeli nie rusza, więc bez tego zapis do revoked_at wywracałby zapytania. */
   const kolumny = db.prepare("PRAGMA table_info(cards)").all().map(r => r.name);
   if (!kolumny.includes("revoked_at")) db.exec("ALTER TABLE cards ADD COLUMN revoked_at TEXT");
+  /* To samo dla roli konta: bazy sprzed kont ratowników znają wyłącznie lekarzy. */
+  const koloD = db.prepare("PRAGMA table_info(doctors)").all().map(r => r.name);
+  if (!koloD.includes("role")) db.exec("ALTER TABLE doctors ADD COLUMN role TEXT NOT NULL DEFAULT 'lekarz'");
   return {
     cards: new CardStore(db),
     doctors: new DoctorStore(db),
@@ -58,6 +64,20 @@ export function openDatabase(file = process.env.HERO_DB || "data/hero.sqlite") {
 
 const str = v => (typeof v === "string" ? v : v == null ? "" : String(v));
 const arr = v => (Array.isArray(v) ? v : []);
+
+/**
+ * Wiek w latach. Liczy go serwer, bo w zestawie ratunkowym ma być wiek (potrzebny do dawkowania),
+ * a nie data urodzenia (która identyfikuje pacjenta).
+ */
+function ageYears(birthDate) {
+  const d = new Date(str(birthDate));
+  if (Number.isNaN(d.getTime())) return null;
+  const teraz = new Date();
+  let lat = teraz.getFullYear() - d.getFullYear();
+  const m = teraz.getMonth() - d.getMonth();
+  if (m < 0 || (m === 0 && teraz.getDate() < d.getDate())) lat--;
+  return lat >= 0 && lat < 130 ? lat : null;
+}
 
 /** Porównanie treści wpisu niezależne od kolejności kluczy w JSON-ie. */
 const canon = v => {
@@ -70,17 +90,54 @@ const same = (a, b) => JSON.stringify(canon(a)) === JSON.stringify(canon(b));
 class CardStore {
   constructor(db) { this.db = db; }
 
-  /** Zestaw jawny: dokładnie to, co ratownik widzi po zbliżeniu opaski. */
-  publicCard(tagId) {
+  /**
+   * Karta z bazy, bez historii odczytów. Wewnętrzna: w tej postaci nie wychodzi poza serwer,
+   * bo niesie nazwisko, datę urodzenia i kontakty alarmowe.
+   */
+  storedCard(tagId) {
     const row = this.db.prepare("SELECT * FROM cards WHERE tag_id = ?").get(tagId);
     if (!row) return null;
     return { tagId: row.tag_id, demo: !!row.demo, updatedAt: row.updated_at, updatedBy: row.updated_by,
       revokedAt: row.revoked_at || null, ...JSON.parse(row.data) };
   }
 
-  /** Pełna karta wraz z historią odczytów — tylko po weryfikacji PIN-u. */
+  /**
+   * Zestaw ratunkowy: wszystko, co pozwala uratować życie, i nic, co mówi, kim pacjent jest.
+   * To jedyna postać karty, jaką serwer oddaje bez konta zawodowego — bo sam identyfikator
+   * opaski ma każdy, kto ją podniósł z chodnika.
+   *
+   * Wchodzi: grupa krwi, masa, wiek (nie data urodzenia), języki kontaktu, wszczepy, uwagi dla
+   * zespołu, DNR i zgoda na pobranie narządów, wszystkie alergie, leki przeciwkrzepliwe oraz
+   * rozpoznania poza przebytymi.
+   *
+   * Nie wchodzi: nazwisko, data urodzenia, kontakty alarmowe (to dane osób trzecich), leki inne niż
+   * przeciwkrzepliwe, rozpoznania przebyte, historia odczytów.
+   */
+  rescueCard(tagId) {
+    const card = this.storedCard(tagId);
+    if (!card) return null;
+    const p = card.person && typeof card.person === "object" ? card.person : {};
+    return {
+      tagId: card.tagId,
+      rescue: true,
+      person: {
+        blood: str(p.blood), rh: str(p.rh), weightKg: str(p.weightKg), heightCm: str(p.heightCm),
+        langs: str(p.langs), devices: str(p.devices), note: str(p.note),
+        dnr: !!p.dnr, donor: !!p.donor, ageYears: ageYears(p.birthDate),
+      },
+      allergies: arr(card.allergies),
+      meds: arr(card.meds).filter(m => m && m.anticoag),
+      /* Odpada tylko to, co minęło. Rozpoznanie kontrolowane albo bez statusu zostaje: cukrzyca
+         „kontrolowana" decyduje przy nieprzytomnym tak samo jak „aktywna", a brak pola nie jest
+         powodem, żeby coś przed ratownikiem ukryć. Ta sama reguła co w `critical()` w aplikacji. */
+      conditions: arr(card.conditions).filter(c => c && str(c.status) !== "przebyta"),
+      updatedAt: card.updatedAt, updatedBy: card.updatedBy, revokedAt: card.revokedAt,
+    };
+  }
+
+  /** Pełna karta wraz z historią odczytów — dla konta zawodowego albo po PIN-ie pacjenta. */
   fullCard(tagId) {
-    const card = this.publicCard(tagId);
+    const card = this.storedCard(tagId);
     if (!card) return null;
     card.reads = this.reads(tagId);
     return card;
@@ -142,7 +199,7 @@ class CardStore {
     if (!exists && !body.pinHash) return { status: 400, error: "Nowa karta wymaga pola pinHash" };
 
     const person = body.person && typeof body.person === "object" ? body.person : {};
-    const prev = exists ? this.publicCard(tagId) : null;
+    const prev = exists ? this.storedCard(tagId) : null;
     const now = new Date().toISOString();
     const data = { person, ...Object.fromEntries(SECTIONS.map(k =>
       [k, trusted ? arr(body[k]) : this.#signEntries(k, arr(body[k]), prev, doctor, now)])) };

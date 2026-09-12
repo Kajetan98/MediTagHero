@@ -1,7 +1,8 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync, readFileSync } from "node:fs";
+import { runInNewContext } from "node:vm";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer, tlsFromEnv, adresyLokalne } from "../server/index.js";
@@ -29,6 +30,13 @@ const post = (path, body, doctor) => json(path, {
   headers: { "content-type": "application/json", ...(doctor ? { "x-hero-doctor": doctor } : {}) },
   body: JSON.stringify(body),
 });
+/* Skróty do serwera z nietkniętymi licznikami: test zalewania historii zużywa limit odczytów
+   na pierwszym serwerze, a część rzeczy trzeba sprawdzić właśnie na ścieżce odczytu. */
+const J = (path, opts) => json(path, opts, baseSwiezy);
+const jsonBody = (metoda, body, naglowki = {}) => ({
+  method: metoda, headers: { "content-type": "application/json", ...naglowki }, body: JSON.stringify(body),
+});
+
 const LEKARZ = { pwz: "1234567", name: "dr Tomasz Lewandowski", password: "meditag123" };
 let TOKEN;
 
@@ -68,7 +76,8 @@ test("nowa karta powstaje, druga próba bez PIN-u jej nie nadpisze", async () =>
   const blocked = await put(`/api/cards/${TAG}`, { person: { name: "Podszywacz" } }, "zly-pin");
   assert.equal(blocked.status, 403);
 
-  const still = await json(`/api/cards/${TAG}`);
+  /* Nazwiska nie ma już w odczycie bez konta, więc zaglądamy PIN-em. */
+  const still = await session(TAG, PIN);
   assert.equal(still.body.person.name, "Jan Kowalski");
 });
 
@@ -88,13 +97,127 @@ test("lista kart oddaje wyłącznie karty przykładowe", async () => {
   assert.equal((await json("/api/health")).body.cards > body.length, true);
 });
 
-test("odczyt ratunkowy nie wymaga PIN-u i nie ujawnia PIN-u ani historii", async () => {
+test("odczyt bez konta oddaje sam zestaw ratunkowy", async () => {
   const { status, body } = await json(`/api/cards/${TAG}`);
   assert.equal(status, 200);
+  assert.equal(body.rescue, true, "odpowiedź mówi wprost, że to zestaw zawężony");
+
+  /* To, co ratuje życie, jest. */
   assert.equal(body.allergies[0].allergen, "Penicylina");
   assert.equal(body.meds[0].anticoag, true);
+  assert.equal(body.person.blood, "0");
+  assert.equal(body.person.rh, "-");
+  assert.equal(body.person.ageYears, 46, "wiek liczy serwer, żeby data urodzenia nie wychodziła");
+
+  /* To, co mówi kim pacjent jest — nie ma. */
+  assert.equal(body.person.name, undefined, "nazwisko wymaga konta");
+  assert.equal(body.person.birthDate, undefined, "data urodzenia identyfikuje, wiek wystarczy");
+  assert.equal(body.contacts, undefined, "kontakty alarmowe to dane osób trzecich");
   assert.equal(body.pinHash, undefined);
   assert.equal(body.reads, undefined);
+});
+
+/* Zakres zestawu ratunkowego jest opisany dwa razy: serwer liczy go w `rescueCard`, a aplikacja
+   w `rescueOf` — na wypadek pracy bez serwera. Ten test pilnuje, żeby te dwa opisy się nie rozeszły. */
+test("zestaw ratunkowy w przeglądarce i na serwerze opisuje ten sam zakres", async () => {
+  const src = readFileSync(new URL("../web/app.html", import.meta.url), "utf8");
+  const blok = src.match(/\/\* KARTA:START[\s\S]*?\/\* KARTA:END \*\//);
+  const ageSrc = src.match(/^const age = .*$/m);
+  assert.ok(blok && ageSrc, "w web/app.html nie ma bloku KARTA ani helpera age");
+  const { rescueOf } = runInNewContext("(function(){" + ageSrc[0] + "\n" + blok[0] + "\nreturn {rescueOf};})()");
+
+  const kli = rescueOf(store.cards.fullCard(TAG));
+  const srv = (await J(`/api/cards/${TAG}`)).body;
+  /* Pola puste pomijamy: serwer oddaje `revokedAt: null`, aplikacja tego pola nie zna. */
+  const klucze = o => Object.keys(o).filter(k => o[k] !== undefined && o[k] !== null).sort();
+
+  assert.deepEqual(klucze(kli), klucze(srv), "ten sam zestaw pól na wierzchu");
+  assert.deepEqual(klucze(kli.person), klucze(srv.person), "ten sam zestaw pól o pacjencie");
+  assert.equal(kli.person.ageYears, srv.person.ageYears);
+  assert.deepEqual(kli.meds.map(m => m.name), srv.meds.map(m => m.name));
+  assert.deepEqual(kli.conditions.map(c => c.name), srv.conditions.map(c => c.name));
+  assert.deepEqual(kli.allergies.map(a => a.allergen), srv.allergies.map(a => a.allergen));
+});
+
+test("zestaw ratunkowy zawęża leki i rozpoznania, ale nie chowa wątpliwych", async () => {
+  const tag = "HERO-7100-LA";
+  const pin = digest(tag, "4321");
+  assert.equal((await J(`/api/cards/${tag}`, jsonBody("PUT", {
+    pinHash: pin,
+    person: { name: "Ewa Lis", birthDate: "1990-01-01", blood: "A", rh: "+" },
+    meds: [
+      { id: "m1", name: "Rywaroksaban", anticoag: true },
+      { id: "m2", name: "Sertralina", anticoag: false },
+    ],
+    conditions: [
+      { id: "c1", name: "Padaczka", status: "aktywna" },
+      { id: "c2", name: "Cukrzyca typu 2", status: "kontrolowana" },
+      { id: "c3", name: "Zapalenie płuc", status: "przebyta" },
+      { id: "c4", name: "Rozpoznanie bez statusu" },
+    ],
+    contacts: [{ id: "k1", name: "Marek Lis", phone: "+48 600 100 200" }],
+  }))).status, 201);
+
+  const { body } = await J(`/api/cards/${tag}`);
+  assert.deepEqual(body.meds.map(m => m.name), ["Rywaroksaban"],
+    "lek bez znaczenia w nagłym wypadku nie wychodzi bez konta");
+  assert.deepEqual(body.conditions.map(c => c.name),
+    ["Padaczka", "Cukrzyca typu 2", "Rozpoznanie bez statusu"],
+    "odpada tylko przebyte; kontrolowane i bez statusu zostają, bo decydują przy nieprzytomnym");
+});
+
+test("konto zawodowe otwiera pełną kartę i zostawia po sobie ślad", async () => {
+  const tag = "HERO-7200-LB";
+  const pin = digest(tag, "4321");
+  assert.equal((await J(`/api/cards/${tag}`, jsonBody("PUT", { ...newCard(), pinHash: pin }))).status, 201);
+
+  const ratownik = { pwz: "RM/2026/1188", name: "Adam Zieliński", password: "meditag123", role: "ratownik" };
+  assert.equal((await J("/api/doctors", jsonBody("POST", ratownik))).status, 201);
+  const token = (await J("/api/doctors/session", jsonBody("POST", { pwz: ratownik.pwz, password: ratownik.password }))).body.token;
+
+  const pelna = await J(`/api/cards/${tag}`, { headers: { "x-hero-doctor": token } });
+  assert.equal(pelna.status, 200);
+  assert.equal(pelna.body.rescue, undefined, "to już nie jest zestaw zawężony");
+  assert.equal(pelna.body.person.name, "Jan Kowalski", "konto widzi nazwisko");
+  assert.equal(pelna.body.person.birthDate, "1980-05-02");
+  assert.equal(pelna.body.contacts[0].name, "Anna Kowalska", "konto widzi kontakty alarmowe");
+
+  const slad = pelna.body.reads[0];
+  assert.equal(slad.ctx, "dostęp ratownika", "kontekst bierze się z roli konta, nie z żądania");
+  assert.match(slad.by, /Adam Zieliński, ratownik medyczny nr RM\/2026\/1188/);
+  assert.equal((await J(`/api/cards/${tag}`)).body.reads, undefined, "bez konta historii nie widać");
+});
+
+test("konto ratownika nie podpisuje wpisów w karcie", async () => {
+  const tag = "HERO-7300-LC";
+  const pin = digest(tag, "4321");
+  const ratownik = { pwz: "RM/2026/2299", name: "Kinga Mazur", password: "meditag123", role: "ratownik" };
+  assert.equal((await J("/api/doctors", jsonBody("POST", ratownik))).status, 201);
+  const token = (await J("/api/doctors/session", jsonBody("POST", { pwz: ratownik.pwz, password: ratownik.password }))).body.token;
+
+  const zapis = await J(`/api/cards/${tag}`, jsonBody("PUT", {
+    pinHash: pin,
+    person: { name: "Piotr Dąb" },
+    conditions: [{ id: "c1", name: "Astma", status: "aktywna", source: "lekarz" }],
+  }, { "x-hero-doctor": token }));
+  assert.equal(zapis.status, 201);
+  assert.equal(zapis.body.updatedBy, "pacjent", "ratownik pisze jak każdy, kto zna PIN");
+  assert.equal(zapis.body.conditions[0].source, "pacjent");
+  assert.equal(zapis.body.conditions[0].signedBy, undefined, "podpis niesie tylko konto lekarza");
+});
+
+test("konto ratownika zakłada się na numer rejestru, nie na PWZ", async () => {
+  assert.equal((await J("/api/doctors", jsonBody("POST",
+    { pwz: "abc", name: "Za krótki numer", password: "meditag123", role: "ratownik" }))).status, 400);
+  assert.equal((await J("/api/doctors", jsonBody("POST",
+    { pwz: "12345", name: "Marek Ratownik", password: "meditag123", role: "ratownik" }))).status, 201,
+    "ratownikowi nie narzucamy siedmiu cyfr");
+  assert.equal((await J("/api/doctors", jsonBody("POST",
+    { pwz: "12345", name: "Inny Ratownik", password: "meditag123", role: "lekarz" }))).status, 400,
+    "lekarzowi narzucamy");
+  assert.equal((await J("/api/doctors", jsonBody("POST",
+    { pwz: "12345", name: "Duplikat", password: "meditag123", role: "ratownik" }))).status, 409,
+    "numer jest unikalny niezależnie od roli");
 });
 
 test("każdy odczyt trafia do historii dostępnej po PIN-ie", async () => {
@@ -282,13 +405,6 @@ test("TLS bierze się ze ścieżek w środowisku albo nie bierze wcale", () => {
 
   assert.throws(() => tlsFromEnv({ HERO_TLS_KEY: join(dir, "nie-ma.pem"), HERO_TLS_CERT: join(dir, "cert.pem") }),
     /certyfikat/i, "brakujący plik zatrzymuje start z czytelnym błędem");
-});
-
-/* Poniższe idzie przez `baseSwiezy`: unieważnienie trzeba sprawdzić także na ścieżce odczytu,
-   a limit odczytów na pierwszym serwerze jest już zużyty. */
-const J = (path, opts) => json(path, opts, baseSwiezy);
-const jsonBody = (metoda, body, naglowki = {}) => ({
-  method: metoda, headers: { "content-type": "application/json", ...naglowki }, body: JSON.stringify(body),
 });
 
 test("unieważniona opaska nie oddaje karty pod starym adresem", async () => {

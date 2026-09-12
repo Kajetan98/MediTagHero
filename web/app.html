@@ -276,7 +276,7 @@ footer .wrap{display:flex;gap:1.2rem;justify-content:space-between;align-items:c
       <a href="#/">Start</a>
       <a href="#/karta">Moja karta</a>
       <a href="#/odczyt">Odczyt ratunkowy</a>
-      <a href="#/lekarz">Panel lekarza</a>
+      <a href="#/lekarz">Konto zawodowe</a>
     </nav>
     <span class="chip-mode" id="modeChip" title="Gdzie zapisywane są dane">…</span>
   </div>
@@ -325,6 +325,15 @@ const LS = "hero.cards.v1";
 const LSD = "hero.doctors.v1";
 const LSO = "hero.owners.v1";
 const PWZ_RE = /^[0-9]{7}$/;
+/* Numer w rejestrze ratowników medycznych nie ma ustalonego formatu — sprawdzamy długość i znaki. */
+const RATOWNIK_RE = /^[A-Za-z0-9/-]{4,20}$/;
+/** Jak konto podpisuje się w historii odczytów i pod wpisem. */
+const kontoOpis = k => k && k.role === "ratownik"
+  ? k.name + ", ratownik medyczny nr " + k.pwz
+  : k ? k.name + ", PWZ " + k.pwz : "";
+const kontoRola = k => (k && k.role === "ratownik") ? "ratownik" : "lekarz";
+/** Kontekst wpisu w historii — ta sama nazwa, co po stronie serwera. */
+const readCtx = k => kontoRola(k) === "ratownik" ? "dostęp ratownika" : "dostęp lekarza";
 let API = false;      /* true, gdy odpowiada serwer HERO */
 let PIN_DG = null;    /* skrót PIN-u bieżącej sesji, wysyłany przy zapisie */
 let DOCTOR = null;    /* zalogowane konto lekarza: {token, name, pwz} */
@@ -396,6 +405,28 @@ function critical(card){
   };
 }
 
+/**
+ * Zestaw ratunkowy: to, co serwer HERO wydaje bez konta zawodowego. Odpada wszystko, co wskazuje
+ * na osobę — nazwisko, data urodzenia, kontakty alarmowe — a z leków zostają same antykoagulanty.
+ * Egzekwuje to serwer w `rescueCard`; ta kopia obsługuje tryb bez serwera, żeby zakres był ten sam.
+ */
+function rescueOf(card){
+  const p = card.person || {};
+  return {
+    tagId: card.tagId,
+    rescue: true,
+    person: {
+      blood: p.blood || "", rh: p.rh || "", weightKg: p.weightKg || "", heightCm: p.heightCm || "",
+      langs: p.langs || "", devices: p.devices || "", note: p.note || "",
+      dnr: !!p.dnr, donor: !!p.donor, ageYears: age(p.birthDate),
+    },
+    allergies: (card.allergies || []).slice(),
+    meds: (card.meds || []).filter(m => m && m.anticoag),
+    conditions: (card.conditions || []).filter(c => c && c.status !== "przebyta"),
+    updatedAt: card.updatedAt, updatedBy: card.updatedBy,
+  };
+}
+
 const waga = a => Number(a && a.severity) || 1;
 /** Alergie malejąco po nasileniu: anafilaksja ma być pierwsza, nie gdziekolwiek. */
 const roAllergies = card => (card.allergies || []).slice().sort((x, y) => waga(y) - waga(x));
@@ -423,6 +454,7 @@ function handoverText(card, lat){
   const p = card.person || {};
   const L = [];
   L.push("HERO — karta ratunkowa MediTag " + card.tagId);
+  if(card.rescue) L.push("Zakres: zestaw ratunkowy — bez nazwiska, kontaktów i pełnej listy rozpoznań");
   L.push("Pacjent: " + (p.name || "nieznany") + (lat != null ? ", " + lat + " lat" : "")
     + (p.blood ? ", grupa " + p.blood + (p.rh || "") : ""));
   L.push("Alergie: " + (roAllergies(card).map(x => x.allergen + " (" + SEV[waga(x)] + ")").join("; ") || "brak zgłoszonych"));
@@ -445,7 +477,9 @@ const store = {
    */
   async get(tagId){
     if(API){
-      const r = await fetch(api("cards/" + encodeURIComponent(tagId)));
+      /* Z kontem zawodowym serwer oddaje kartę w całości i zapisuje odczyt w historii. Bez konta —
+         sam zestaw ratunkowy, oznaczony polem `rescue`. */
+      const r = await fetch(api("cards/" + encodeURIComponent(tagId)), {headers: docHeader()});
       if(r.status === 410){ const j = await r.json().catch(() => ({})); return {tagId, revoked:true, revokedAt:j.revokedAt || null}; }
       if(!r.ok) return null;
       return r.json();
@@ -453,7 +487,9 @@ const store = {
     const c = lsAll()[tagId];
     if(!c) return null;
     if(c.revokedAt) return {tagId, revoked:true, revokedAt:c.revokedAt};
-    return c;
+    /* Bez serwera karta leży w tej przeglądarce, więc nie ma czego egzekwować. Zakres pokazujemy
+       jednak ten sam, co serwer wydaje bez konta — inaczej demonstracja kłamałaby o dostępie. */
+    return DOCTOR ? c : rescueOf(c);
   },
   async list(){
     if(API){ const r = await fetch(api("cards")); if(!r.ok) return []; return r.json(); }
@@ -569,21 +605,23 @@ const docHeader = () => (API && DOCTOR && DOCTOR.token) ? {"x-hero-doctor": DOCT
  * przeglądarki i podpis jest tylko etykietą: nie ma czego egzekwować.
  */
 const doctors = {
-  async register({pwz, name, password}){
+  async register({pwz, name, password, role}){
     const numer = String(pwz || "").trim(), imie = String(name || "").trim();
-    if(!PWZ_RE.test(numer)) return {ok:false, error:"Numer PWZ składa się z siedmiu cyfr"};
+    const rola = role === "ratownik" ? "ratownik" : "lekarz";
+    if(rola === "lekarz" && !PWZ_RE.test(numer)) return {ok:false, error:"Numer PWZ składa się z siedmiu cyfr"};
+    if(rola === "ratownik" && !RATOWNIK_RE.test(numer)) return {ok:false, error:"Numer ratownika ma od 4 do 20 znaków"};
     if(imie.length < 3) return {ok:false, error:"Podaj imię i nazwisko"};
     if(String(password || "").length < 8) return {ok:false, error:"Hasło musi mieć co najmniej 8 znaków"};
     if(API){
       const r = await fetch(api("doctors"), {method:"POST", headers:{"content-type":"application/json"},
-        body: JSON.stringify({pwz:numer, name:imie, password})});
+        body: JSON.stringify({pwz:numer, name:imie, password, role:rola})});
       if(r.ok) return {ok:true};
       const j = await r.json().catch(() => ({}));
       return {ok:false, error: j.error || "Nie udało się założyć konta"};
     }
     const all = lsDocs();
-    if(all[numer]) return {ok:false, error:"Konto z tym numerem PWZ już istnieje"};
-    all[numer] = {pwz:numer, name:imie, pass: await digest("pwz:" + numer, password)};
+    if(all[numer]) return {ok:false, error:"Konto z tym numerem już istnieje"};
+    all[numer] = {pwz:numer, name:imie, role:rola, pass: await digest("pwz:" + numer, password)};
     lsDocsSave(all);
     return {ok:true};
   },
@@ -592,15 +630,15 @@ const doctors = {
     if(API){
       const r = await fetch(api("doctors/session"), {method:"POST", headers:{"content-type":"application/json"},
         body: JSON.stringify({pwz:numer, password})});
-      if(!r.ok) return {ok:false, error:"Nieprawidłowy numer PWZ albo hasło"};
+      if(!r.ok) return {ok:false, error:"Nieprawidłowy numer albo hasło"};
       const j = await r.json();
-      DOCTOR = {token:j.token, name:j.doctor.name, pwz:j.doctor.pwz};
+      DOCTOR = {token:j.token, name:j.doctor.name, pwz:j.doctor.pwz, role:j.doctor.role || "lekarz"};
       ses.doctor(DOCTOR);
       return {ok:true};
     }
     const rec = lsDocs()[numer];
-    if(!rec || rec.pass !== await digest("pwz:" + numer, password)) return {ok:false, error:"Nieprawidłowy numer PWZ albo hasło"};
-    DOCTOR = {token:null, name:rec.name, pwz:rec.pwz};
+    if(!rec || rec.pass !== await digest("pwz:" + numer, password)) return {ok:false, error:"Nieprawidłowy numer albo hasło"};
+    DOCTOR = {token:null, name:rec.name, pwz:rec.pwz, role:rec.role || "lekarz"};
     ses.doctor(DOCTOR);
     return {ok:true};
   },
@@ -613,6 +651,7 @@ const doctors = {
       if(!r || !r.ok){ ses.doctor(null); DOCTOR = null; return null; }
       const j = await r.json().catch(() => ({}));
       saved.sessions = j.sessions;
+      if(j.role) saved.role = j.role;
     }
     DOCTOR = saved;
     return DOCTOR;
@@ -1125,15 +1164,15 @@ async function renderStart(){
   +   '<div class="steps">'
   +     '<div class="step"><span class="n">1</span><div><h3>Pacjent prowadzi kartę</h3><p class="small muted">Sam albo razem z lekarzem wpisuje alergie, leki i choroby. Wpis lekarza niesie jego nazwisko i numer PWZ.</p></div></div>'
   +     '<div class="step"><span class="n">2</span><div><h3>Opaska nosi identyfikator</h3><p class="small muted">Kartę zapisujesz na opasce jednym zbliżeniem — zakładka „Opaska NFC”. W pamięci opaski zostaje sam adres karty, bez danych medycznych.</p></div></div>'
-  +     '<div class="step"><span class="n">3</span><div><h3>Zbliżenie otwiera kartę</h3><p class="small muted">Zakres zależy od tego, kto zbliżył telefon: ratownik dostaje zestaw krytyczny bez logowania, pacjent i lekarz — pełną kartę po PIN-ie. Każdy odczyt jest logowany.</p></div></div>'
+  +     '<div class="step"><span class="n">3</span><div><h3>Zbliżenie otwiera kartę</h3><p class="small muted">Zakres zależy od tego, kto zbliżył telefon: bez konta widać sam zestaw ratunkowy, konto lekarza albo ratownika otwiera kartę w całości, pacjent wchodzi do niej PIN-em. Każdy odczyt jest logowany.</p></div></div>'
   +   '</div>'
   + '</section>'
 
-  + '<section style="margin-top:2.6rem"><h2>Wejdź jako</h2><p class="muted small" style="margin:.3rem 0 1rem">Trzy role, trzy różne zakresy dostępu do tej samej karty.</p>'
+  + '<section style="margin-top:2.6rem"><h2>Wejdź jako</h2><p class="muted small" style="margin:.3rem 0 1rem">Trzy wejścia, trzy różne zakresy dostępu do tej samej karty.</p>'
   +   '<div class="roles">'
   +     '<a class="role" href="#/karta"><h3>Pacjent</h3><p>Zakładasz kartę, ustawiasz PIN i decydujesz, co widzi ratownik. Możesz kartę usunąć w każdej chwili.</p><div class="go">Moja karta →</div></a>'
-  +     '<a class="role" href="#/lekarz"><h3>Lekarz</h3><p>Zakładasz konto z numerem PWZ, otwierasz kartę kodem pacjenta i uzupełniasz rozpoznania, leki i alergie. Każdy twój wpis niesie twoje nazwisko i numer.</p><div class="go">Panel lekarza →</div></a>'
-  +     '<a class="role crit" href="#/odczyt"><h3>Ratownik</h3><p>Sam identyfikator opaski, bez hasła. Zestaw krytyczny: alergie, antykoagulanty, choroby, kontakt alarmowy.</p><div class="go">Odczyt ratunkowy →</div></a>'
+  +     '<a class="role" href="#/lekarz"><h3>Lekarz i ratownik medyczny</h3><p>Konto zawodowe otwiera kartę w całości: nazwisko, kontakty alarmowe, pełną listę rozpoznań. Lekarz dopisuje rozpoznania, leki i alergie — każdy wpis niesie jego nazwisko i numer.</p><div class="go">Konto zawodowe →</div></a>'
+  +     '<a class="role crit" href="#/odczyt"><h3>Bez konta</h3><p>Sam identyfikator opaski, bez hasła. Zestaw ratunkowy: grupa krwi, alergie, antykoagulanty, wszczepy, DNR — bez nazwiska i kontaktów.</p><div class="go">Odczyt ratunkowy →</div></a>'
   +   '</div>'
   + '</section>'
 
@@ -1151,13 +1190,17 @@ async function renderStart(){
 /* ---------------- emergency read-out ---------------- */
 function readoutHTML(card, entry){
   const p = card.person || {};
-  const a = age(p.birthDate);
+  /* Zestaw ratunkowy niesie sam wiek: daty urodzenia serwer nie oddaje bez konta. */
+  const a = card.rescue ? (p.ageYears == null ? null : p.ageYears) : age(p.birthDate);
   const flags = roFlags(card).map(f => '<span class="tag tag-'+f.waga+'">'+esc(f.tekst)+'</span>');
 
   return '<div class="readout">'
   + '<div class="ro-head">'
-  +   '<div><p class="eyebrow" style="color:var(--on-crit);opacity:.75">Odczyt ratunkowy · HERO</p><h2>'+esc(p.name || "Pacjent nieznany")+'</h2>'
-  +   '<p class="small" style="color:var(--on-crit);opacity:.9">'+esc(fmtD(p.birthDate))+(a!==null?' · '+a+' lat':"")+(p.weightKg?' · '+esc(p.weightKg)+' kg':"")+'</p></div>'
+  +   '<div><p class="eyebrow" style="color:var(--on-crit);opacity:.75">Odczyt ratunkowy · HERO</p>'
+  +   '<h2>'+esc(card.rescue ? "Zestaw ratunkowy" : (p.name || "Pacjent nieznany"))+'</h2>'
+  +   '<p class="small" style="color:var(--on-crit);opacity:.9">'
+  +     (card.rescue ? "" : esc(fmtD(p.birthDate)))+(a!==null?(card.rescue?"":" · ")+a+' lat':"")
+  +     (p.weightKg?' · '+esc(p.weightKg)+' kg':"")+'</p></div>'
   +   '<div class="ro-blood">'+esc((p.blood||"?") + (p.rh||""))+'<small>grupa krwi</small></div>'
   + '</div>'
   + (flags.length ? '<div class="ro-flags">'+flags.join("")+'</div>' : "")
@@ -1172,7 +1215,9 @@ function readoutHTML(card, entry){
   + '</div>'
   + (p.devices || p.note ? '<div class="ro-sec"><h4>Uwagi istotne dla zespołu</h4><p class="small">'+esc([p.devices, p.note].filter(Boolean).join(" · "))+'</p></div>' : "")
   + '<div class="ro-sec"><h4>Kontakty alarmowe</h4><div class="contacts">'
-  +   ((card.contacts||[]).length ? (card.contacts||[]).map(k => '<div class="contact"><div class="small" style="font-weight:600">'+esc(k.name)+(k.primary?' <span class="tag tag-ok">pierwszy</span>':"")+'</div><div class="tiny muted">'+esc(k.relation||"")+'</div><a href="tel:'+esc((k.phone||"").replace(/\s/g,""))+'">'+esc(k.phone)+'</a></div>').join("") : '<p class="small muted">Brak kontaktów alarmowych.</p>')
+  +   (card.rescue
+      ? '<p class="small muted">Nazwisko pacjenta i kontakty alarmowe otwiera konto lekarza albo ratownika. Bez konta zostaje to, co ratuje życie.</p>'
+      : (card.contacts||[]).length ? (card.contacts||[]).map(k => '<div class="contact"><div class="small" style="font-weight:600">'+esc(k.name)+(k.primary?' <span class="tag tag-ok">pierwszy</span>':"")+'</div><div class="tiny muted">'+esc(k.relation||"")+'</div><a href="tel:'+esc((k.phone||"").replace(/\s/g,""))+'">'+esc(k.phone)+'</a></div>').join("") : '<p class="small muted">Brak kontaktów alarmowych.</p>')
   + '</div></div>'
   + '<div class="ro-foot"><span>Karta <span class="tagid">'+esc(card.tagId)+'</span> · aktualizacja '+esc(fmtDT(card.updatedAt))+' ('+esc(card.updatedBy||"pacjent")+')</span>'
   +   '<span>Odczyt zapisany: '+esc(fmtDT(entry.at))+' · '+esc(entry.by)+'</span></div>'
@@ -1201,7 +1246,10 @@ function wireHandover(card){
   const b = document.getElementById("copyHand");
   if(!b) return;
   b.addEventListener("click", async () => {
-    try { await navigator.clipboard.writeText(handoverText(card, age((card.person || {}).birthDate))); toast("Podsumowanie skopiowane"); }
+    /* Zestaw ratunkowy nie niesie daty urodzenia — sam wiek policzony na serwerze. */
+    const p = card.person || {};
+    const lat = card.rescue ? (p.ageYears == null ? null : p.ageYears) : age(p.birthDate);
+    try { await navigator.clipboard.writeText(handoverText(card, lat)); toast("Podsumowanie skopiowane"); }
     catch(err){ toast("Przeglądarka zablokowała schowek"); }
   });
 }
@@ -1209,14 +1257,16 @@ function wireHandover(card){
 async function renderScan(params){
   const pre = params.get("tag") || "";
   view.innerHTML = '<div class="stack" style="max-width:760px;margin-inline:auto">'
-  + '<div><p class="eyebrow">Rola: ratownik</p><h1 style="font-size:2rem">Odczyt ratunkowy</h1>'
-  + '<p class="muted" style="margin-top:.5rem">W realnym urządzeniu ten ekran otwiera się po zbliżeniu telefonu do opaski. Tutaj wpisz identyfikator karty ręcznie.</p></div>'
+  + '<div><p class="eyebrow">' + (DOCTOR ? 'Konto zawodowe: ' + esc(kontoRola(DOCTOR)) : 'Bez konta') + '</p><h1 style="font-size:2rem">Odczyt ratunkowy</h1>'
+  + '<p class="muted" style="margin-top:.5rem">W realnym urządzeniu ten ekran otwiera się po zbliżeniu telefonu do opaski. Tutaj wpisz identyfikator karty ręcznie. '
+  +   (DOCTOR ? 'Twoje konto otwiera kartę w całości.' : 'Bez konta zobaczysz sam zestaw ratunkowy.') + '</p></div>'
   + '<div class="panel"><div class="panel-b"><form id="scanForm" class="row">'
   +   '<label class="f" style="flex:2 1 220px">Identyfikator opaski<input class="mono" name="tag" placeholder="identyfikator z opaski" value="'+esc(pre)+'" required></label>'
-  +   '<label class="f" style="flex:1 1 160px">Kto odczytuje<input name="by" placeholder="ZRM P-12 / SOR"></label>'
+  +   (DOCTOR ? '' : '<label class="f" style="flex:1 1 160px">Kto odczytuje<input name="by" placeholder="ZRM P-12 / SOR"></label>')
   +   '<button class="btn btn-crit" type="submit">Odczytaj kartę</button>'
   +   (nfcReady() ? '<button class="btn" type="button" id="scanNfc">Odczytaj z opaski</button>' : "")
-  + '</form><p class="tiny muted" style="margin-top:.6rem">Odczyt nie wymaga PIN-u i zostaje zapisany w historii karty wraz z podanym opisem czytnika.</p></div></div>'
+  + '</form><p class="tiny muted" style="margin-top:.6rem">Odczyt nie wymaga PIN-u i zostaje zapisany w historii karty — '
+  +   (DOCTOR ? 'pod nazwiskiem i numerem z twojego konta.' : 'wraz z podanym opisem czytnika.') + '</p></div></div>'
   + '<div id="scanOut"></div></div>';
 
   const out = document.getElementById("scanOut");
@@ -1234,13 +1284,21 @@ async function renderScan(params){
   form.addEventListener("submit", async e => {
     e.preventDefault();
     const tag = form.tag.value.trim().toUpperCase();
-    const by = form.by.value.trim() || "czytnik nieopisany";
+    const by = form.by ? (form.by.value.trim() || "czytnik nieopisany") : kontoOpis(DOCTOR);
     const card = await store.get(tag);
     if(!card){ out.innerHTML = '<div class="notice crit"><span>Nie znaleziono karty <b class="tagid">'+esc(tag)+'</b>. Sprawdź identyfikator albo załóż kartę w zakładce „Moja karta”.</span></div>'; return; }
     if(card.revoked){ out.innerHTML = revokedHTML(tag, card.revokedAt); return; }
-    const entry = await store.logRead(tag, by, "odczyt ratunkowy");
-    out.innerHTML = readoutHTML(critical(card), entry)
-      + '<div class="row" style="margin-top:.8rem"><button class="btn btn-sm" id="copyHand">Skopiuj podsumowanie do przekazania</button></div>';
+    /* Kartę wydaną kontu serwer wpisał już do historii — drugi wpis byłby zdublowany. */
+    const entry = (API && DOCTOR)
+      ? ((card.reads || [])[0] || {at: nowISO(), by: kontoOpis(DOCTOR)})
+      : await store.logRead(tag, by, DOCTOR ? readCtx(DOCTOR) : "odczyt ratunkowy");
+    out.innerHTML = (card.rescue
+        ? '<div class="notice"><span>To zestaw ratunkowy: bez nazwiska pacjenta i bez kontaktów alarmowych. Kartę w całości otwiera konto lekarza albo ratownika medycznego.</span></div>'
+        : '')
+      + readoutHTML(card.rescue ? card : critical(card), entry)
+      + '<div class="row" style="margin-top:.8rem"><button class="btn btn-sm" id="copyHand">Skopiuj podsumowanie do przekazania</button>'
+      + (card.rescue ? '<a class="btn btn-sm btn-primary" href="#/lekarz">Otwórz kartę kontem zawodowym</a>' : '')
+      + '</div>';
     wireHandover(card);
     out.scrollIntoView({behavior:"smooth", block:"start"});
   });
@@ -1259,7 +1317,7 @@ function renderEditor(){
   const isDoc = ROLE === "lekarz";
   view.innerHTML = '<div class="stack">'
   + '<div class="panel"><div class="panel-h">'
-  +   '<div><p class="eyebrow">'+(isDoc ? "Rola: lekarz — " + esc(DOCTOR ? DOCTOR.name + ", PWZ " + DOCTOR.pwz : "konto nieznane") : "Rola: pacjent")+'</p>'
+  +   '<div><p class="eyebrow">'+(isDoc ? "Rola: lekarz — " + esc(DOCTOR ? kontoOpis(DOCTOR) : "konto nieznane") : "Rola: pacjent")+'</p>'
   +   '<h3>'+esc(p.name || "Karta bez nazwiska")+' <span class="tagid tiny muted">'+esc(CARD.tagId)+'</span>'
   +   (CARD.revokedAt ? ' <span class="tag tag-crit">opaska unieważniona</span>' : "")+'</h3>'
   +   '<p class="tiny muted">Ostatnia zmiana: '+esc(fmtDT(CARD.updatedAt))+' · '+esc(CARD.updatedBy||"pacjent")+'</p></div>'
@@ -1662,8 +1720,9 @@ async function renderCardView(){
 function docBar(){
   const ile = Number(DOCTOR.sessions || 0);
   return '<div class="panel"><div class="panel-h">'
-  + '<div><p class="eyebrow">Zalogowane konto lekarza</p>'
-  + '<h3>' + esc(DOCTOR.name) + ' <span class="mono tiny muted">PWZ ' + esc(DOCTOR.pwz) + '</span></h3>'
+  + '<div><p class="eyebrow">Zalogowane konto: ' + esc(kontoRola(DOCTOR)) + '</p>'
+  + '<h3>' + esc(DOCTOR.name) + ' <span class="mono tiny muted">'
+  +   esc(kontoRola(DOCTOR) === "ratownik" ? "nr " + DOCTOR.pwz : "PWZ " + DOCTOR.pwz) + '</span></h3>'
   + (ile > 1 ? '<p class="tiny muted">Zalogowanych urządzeń: ' + ile + '</p>' : "")
   + '</div>'
   + '<div class="row" style="margin-left:auto">'
@@ -1684,27 +1743,46 @@ function wireDocBar(){
   });
 }
 
-/** Ekran logowania i zakładania konta lekarza. `dalej` wraca tam, skąd przyszło żądanie konta. */
+/** Ekran logowania i zakładania konta zawodowego: lekarz albo ratownik medyczny. */
 function renderDoctorAuth(dalej){
   const next = dalej || renderDoctorView;
   view.innerHTML = '<div class="stack" style="max-width:900px;margin-inline:auto">'
-  + '<div><p class="eyebrow">Rola: lekarz</p><h1 style="font-size:2rem">Panel lekarza</h1>'
-  + '<p class="muted" style="margin-top:.5rem">Konto lekarza służy do podpisywania wpisów: przy każdym rozpoznaniu, leku i alergii, którą dopiszesz, zostaje twoje nazwisko i numer prawa wykonywania zawodu. Ratownik widzi wtedy różnicę między deklaracją pacjenta a wpisem lekarskim.</p></div>'
+  + '<div><p class="eyebrow">Konto zawodowe</p><h1 style="font-size:2rem">Lekarz albo ratownik medyczny</h1>'
+  + '<p class="muted" style="margin-top:.5rem">Konto otwiera kartę w całości: nazwisko pacjenta, kontakty alarmowe i pełną listę rozpoznań. Bez konta zostaje sam zestaw ratunkowy — grupa krwi, alergie, antykoagulanty, wszczepy, DNR. Każde otwarcie karty kontem zapisuje się w jej historii, razem z nazwiskiem i numerem.</p></div>'
   + '<div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(280px,1fr));align-items:start">'
   + '<div class="panel"><div class="panel-h"><h3>Zaloguj się</h3></div><div class="panel-b"><form id="fLogin" class="stack">'
-  +   '<label class="f">Numer PWZ<input class="mono" name="pwz" inputmode="numeric" maxlength="7" required placeholder="1234567"></label>'
+  +   '<label class="f">Numer PWZ albo numer ratownika<input class="mono" name="pwz" maxlength="20" required placeholder="1234567"></label>'
   +   '<label class="f">Hasło<input type="password" name="password" required></label>'
   +   '<button class="btn btn-primary" type="submit">Zaloguj</button><p id="loginErr" class="tiny" style="color:var(--crit)"></p>'
   + '</form></div></div>'
   + '<div class="panel"><div class="panel-h"><h3>Załóż konto</h3></div><div class="panel-b"><form id="fReg" class="stack">'
+  +   '<label class="f">Zawód<select name="role"><option value="lekarz">Lekarz</option><option value="ratownik">Ratownik medyczny</option></select></label>'
+  +   '<label class="f"><span id="regNrLbl">Numer PWZ</span><input class="mono" name="pwz" id="regNr" inputmode="numeric" maxlength="7" required placeholder="1234567"></label>'
   +   '<label class="f">Imię i nazwisko<input name="name" required placeholder="dr Tomasz Lewandowski"></label>'
-  +   '<label class="f">Numer PWZ<input class="mono" name="pwz" inputmode="numeric" maxlength="7" required placeholder="1234567"></label>'
   +   '<label class="f">Hasło<input type="password" name="password" minlength="8" required placeholder="co najmniej 8 znaków"></label>'
+  +   '<p id="regHint" class="tiny muted"></p>'
   +   '<button class="btn btn-primary" type="submit">Załóż konto</button><p id="regErr" class="tiny" style="color:var(--crit)"></p>'
   + '</form></div></div>'
   + '</div>'
-  + '<div class="notice"><span>Numer PWZ sprawdzamy tylko co do formatu — siedem cyfr. Nie liczymy cyfry kontrolnej i nie odpytujemy rejestru Naczelnej Izby Lekarskiej, więc konto nie jest dowodem uprawnień. To zostaje do zrobienia przed wdrożeniem.</span></div>'
+  + '<div class="notice warn"><span>Numer sprawdzamy tylko co do formatu: siedem cyfr u lekarza, od czterech do dwudziestu znaków u ratownika. Nie odpytujemy rejestru Naczelnej Izby Lekarskiej ani rejestru ratowników medycznych, więc konto samo w sobie nie jest dowodem uprawnień. Weryfikacja w rejestrze zostaje do zrobienia przed wdrożeniem.</span></div>'
+  + '<p class="tiny muted">Konto lekarza dodatkowo podpisuje wpisy w karcie: przy rozpoznaniu, leku i alergii zostaje nazwisko i numer PWZ. Ratownik kartę czyta, ale jej nie redaguje.</p>'
   + '</div>';
+
+  const fReg = document.getElementById("fReg");
+  /* Numer wygląda inaczej u lekarza i u ratownika, więc pole opisuje się samo po zmianie zawodu. */
+  const opiszNumer = () => {
+    const ratownik = fReg.role.value === "ratownik";
+    const nr = document.getElementById("regNr");
+    document.getElementById("regNrLbl").textContent = ratownik ? "Numer w rejestrze ratowników" : "Numer PWZ";
+    document.getElementById("regHint").textContent = ratownik
+      ? "Numer z rejestru ratowników medycznych — od 4 do 20 znaków, cyfry, litery, znak / albo -."
+      : "Siedem cyfr z prawa wykonywania zawodu.";
+    nr.maxLength = ratownik ? 20 : 7;
+    nr.inputMode = ratownik ? "text" : "numeric";
+    nr.placeholder = ratownik ? "12345/2019" : "1234567";
+  };
+  fReg.role.addEventListener("change", opiszNumer);
+  opiszNumer();
 
   document.getElementById("fLogin").addEventListener("submit", async e => {
     e.preventDefault(); const f = e.target;
@@ -1712,9 +1790,9 @@ function renderDoctorAuth(dalej){
     if(!r.ok){ formErr("loginErr", r.error); return; }
     next();
   });
-  document.getElementById("fReg").addEventListener("submit", async e => {
+  fReg.addEventListener("submit", async e => {
     e.preventDefault(); const f = e.target;
-    const r = await doctors.register({pwz:f.pwz.value, name:f.name.value, password:f.password.value});
+    const r = await doctors.register({pwz:f.pwz.value, name:f.name.value, password:f.password.value, role:f.role.value});
     if(!r.ok){ formErr("regErr", r.error); return; }
     const zal = await doctors.login({pwz:f.pwz.value, password:f.password.value});
     if(!zal.ok){ formErr("regErr", zal.error); return; }
@@ -1723,40 +1801,52 @@ function renderDoctorAuth(dalej){
   });
 }
 
+/**
+ * Panel konta zawodowego. Lekarz otwiera kartę do edycji PIN-em pacjenta; ratownik czyta ją bez
+ * PIN-u, bo nieprzytomny pacjent go nie poda — uprawnieniem jest samo konto, a odczyt zostaje
+ * w historii karty.
+ */
 async function renderDoctorView(){
   await doctors.restore();
   if(!DOCTOR) return renderDoctorAuth();
+  const ratownik = kontoRola(DOCTOR) === "ratownik";
 
   const s = ses.get();
-  if(s && s.role === "lekarz" && s.dg){
+  if(!ratownik && s && s.role === "lekarz" && s.dg){
     const r = await store.openWithDigest(s.tagId, s.dg);
     if(r.ok){ CARD = r.card; ROLE = "lekarz"; renderEditor(); return; }
     ses.clear();
   }
 
   view.innerHTML = '<div class="stack gate">'
-  + '<div><p class="eyebrow">Rola: lekarz</p><h1 style="font-size:2rem">Otwórz kartę pacjenta</h1>'
-  + '<p class="muted" style="margin-top:.5rem">Pacjent podaje identyfikator opaski i swój PIN. Wpisy, które dodasz, zostaną podpisane twoim kontem.</p></div>'
+  + '<div><p class="eyebrow">Konto zawodowe: ' + esc(kontoRola(DOCTOR)) + '</p><h1 style="font-size:2rem">Otwórz kartę pacjenta</h1>'
+  + '<p class="muted" style="margin-top:.5rem">' + (ratownik
+      ? "Wystarczy identyfikator z opaski albo breloka — konto ratownika otwiera kartę w całości, bez PIN-u."
+      : "Sam identyfikator otwiera kartę do odczytu. PIN pacjenta jest potrzebny dopiero do edycji: wpisy, które dodasz, zostaną podpisane twoim kontem.") + '</p></div>'
   + docBar()
   + '<div class="panel"><div class="panel-b"><form id="fDoc" class="stack">'
   +   '<label class="f">Identyfikator opaski<input class="mono" name="tag" required placeholder="identyfikator z opaski"></label>'
-  +   '<label class="f">Kod dostępu (PIN pacjenta)<input type="password" name="pin" inputmode="numeric" required></label>'
+  +   (ratownik ? "" : '<label class="f">Kod dostępu (PIN pacjenta) — zostaw pusty, żeby tylko odczytać<input type="password" name="pin" inputmode="numeric"></label>')
   +   '<button class="btn btn-primary" type="submit">Otwórz kartę pacjenta</button><p id="docErr" class="tiny" style="color:var(--crit)"></p>'
   + '</form></div></div>'
-  + '<p class="tiny muted">Otwarcie karty zapisuje się w historii odczytów widocznej dla pacjenta — razem z twoim nazwiskiem i numerem PWZ.</p></div>';
+  + '<p class="tiny muted">Otwarcie karty zapisuje się w historii odczytów widocznej dla pacjenta — razem z twoim nazwiskiem i numerem.</p></div>';
 
   wireDocBar();
   document.getElementById("fDoc").addEventListener("submit", async e => {
     e.preventDefault(); const f = e.target;
     const tag = f.tag.value.trim().toUpperCase();
-    const r = await store.verify(tag, f.pin.value);
+    const pin = f.pin ? f.pin.value : "";
+    /* Bez PIN-u konto idzie tą samą drogą co po zbliżeniu opaski: pełna karta do odczytu. */
+    if(!pin){ location.hash = "#/t/" + encodeURIComponent(tag); return; }
+    const r = await store.verify(tag, pin);
     if(!r.ok){ formErr("docErr", r.reason === "pin" ? "Nieprawidłowy kod dostępu." : "Nie ma karty o tym identyfikatorze."); return; }
-    const entry = await store.logRead(tag, DOCTOR.name + ", PWZ " + DOCTOR.pwz, "dostęp lekarza");
+    const entry = await store.logRead(tag, kontoOpis(DOCTOR), "dostęp lekarza");
     r.card.reads = [entry].concat(r.card.reads || []);
     CARD = r.card; ROLE = "lekarz"; TAB = "podstawowe"; ses.set({tagId:tag, role:"lekarz", dg:PIN_DG});
     renderEditor();
   });
 }
+
 
 /* ---------------- karta do portfela ---------------- */
 /**
@@ -1826,9 +1916,10 @@ function renderPrint(card, wroc){
 /** Przełącznik roli. Adres w opasce jest jeden, więc rolę trzeba dać się zmienić ręcznie. */
 function roleBar(tagId, biezaca){
   const b = (k, etykieta) => '<a class="btn btn-sm'+(biezaca===k?" btn-primary":"")+'" href="#/t/'+encodeURIComponent(tagId)+'?rola='+k+'">'+etykieta+'</a>';
+  /* „ratownik" to wejście bez konta — zestaw ratunkowy. Konto zawodowe otwiera kartę w całości. */
   return '<div class="panel"><div class="panel-h">'
   + '<div><p class="eyebrow">Opaska <span class="tagid">'+esc(tagId)+'</span></p><h3>Kto zbliżył opaskę?</h3></div>'
-  + '<div class="row" style="margin-left:auto">'+b("ratownik","Ratownik")+b("lekarz","Lekarz")+b("pacjent","To moja karta")+'</div>'
+  + '<div class="row" style="margin-left:auto">'+b("ratownik","Bez konta")+b("lekarz","Konto zawodowe")+b("pacjent","To moja karta")+'</div>'
   + '</div></div>';
 }
 
@@ -1853,7 +1944,7 @@ function tagGate(tagId, rola){
     const r = await store.verify(tagId, e.target.pin.value);
     if(!r.ok){ formErr("tagErr", r.reason === "pin" ? "Nieprawidłowy PIN." : "Nie ma karty o tym identyfikatorze."); return; }
     if(doc){
-      const entry = await store.logRead(tagId, DOCTOR.name + ", PWZ " + DOCTOR.pwz, "dostęp lekarza");
+      const entry = await store.logRead(tagId, kontoOpis(DOCTOR), readCtx(DOCTOR));
       r.card.reads = [entry].concat(r.card.reads || []);
     } else markOwner(tagId, r.card.person && r.card.person.name);
     CARD = r.card; ROLE = doc ? "lekarz" : "pacjent"; TAB = "podstawowe";
@@ -1876,10 +1967,21 @@ async function tagReadout(tagId){
     + revokedHTML(tagId, card.revokedAt) + '</div>';
     return;
   }
-  const entry = await store.logRead(tagId, "odczyt po zbliżeniu opaski", "odczyt ratunkowy");
-  view.innerHTML = '<div class="stack">' + roleBar(tagId, "ratownik")
-  + readoutHTML(critical(card), entry)
+  /* Z kontem zawodowym ślad zapisuje serwer przy odczycie karty — drugi wpis byłby zdublowany. */
+  const zKontem = !!(DOCTOR && (API || DOCTOR.token === null));
+  const entry = (API && DOCTOR)
+    ? ((card.reads || [])[0] || {at: nowISO(), by: kontoOpis(DOCTOR)})
+    : await store.logRead(tagId, zKontem ? kontoOpis(DOCTOR) : "odczyt po zbliżeniu opaski",
+        zKontem ? readCtx(DOCTOR) : "odczyt ratunkowy");
+  view.innerHTML = '<div class="stack">' + roleBar(tagId, DOCTOR ? "lekarz" : "ratownik")
+  + (card.rescue
+      ? '<div class="notice"><span>To zestaw ratunkowy: wszystko, co pozwala pomóc, bez nazwiska i kontaktów. Kartę w całości otwiera konto lekarza albo ratownika medycznego.</span></div>'
+      : '<div class="notice ok"><span>Karta otwarta kontem: ' + esc(kontoOpis(DOCTOR)) + '. Ten odczyt jest zapisany w historii karty.</span></div>')
+  + readoutHTML(card.rescue ? card : critical(card), entry)
   + '<div class="row"><button class="btn btn-sm" id="copyHand">Skopiuj podsumowanie do przekazania</button>'
+  + (card.rescue
+      ? '<a class="btn btn-sm btn-primary" href="#/t/'+encodeURIComponent(tagId)+'?rola=lekarz">Otwórz kartę kontem zawodowym</a>'
+      : (kontoRola(DOCTOR) === "lekarz" ? '<a class="btn btn-sm" href="#/t/'+encodeURIComponent(tagId)+'?rola=edycja">Otwórz do edycji (PIN pacjenta)</a>' : ""))
   + '<a class="btn btn-sm" href="#/odczyt?tag='+encodeURIComponent(tagId)+'">Odczytaj z opisem czytnika</a></div></div>';
   wireHandover(card);
 }
@@ -1907,8 +2009,11 @@ async function renderTagLanding(tagId, params){
     if(r.ok){ CARD = r.card; ROLE = wybor; TAB = "podstawowe"; renderEditor(); return; }
     ses.clear();
   }
-  if(wybor === "lekarz" && !DOCTOR) return renderDoctorAuth(route);
-  if(wybor === "pacjent" || wybor === "lekarz") return tagGate(tagId, wybor);
+  /* Konto zawodowe nie pyta o PIN, żeby zobaczyć kartę: nieprzytomny pacjent go nie poda. PIN
+     zostaje przy edycji, i po to jest osobne wejście „edycja". */
+  if((wybor === "lekarz" || wybor === "edycja") && !DOCTOR) return renderDoctorAuth(route);
+  if(wybor === "edycja") return tagGate(tagId, "lekarz");
+  if(wybor === "pacjent") return tagGate(tagId, "pacjent");
   return tagReadout(tagId);
 }
 
