@@ -2,6 +2,7 @@ import { createServer as createHttpServer } from "node:http";
 import { createServer as createHttpsServer } from "node:https";
 import { readFile, stat } from "node:fs/promises";
 import { readFileSync } from "node:fs";
+import { networkInterfaces } from "node:os";
 import { join, normalize, extname, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { openDatabase, READ_CTX } from "./db.js";
@@ -234,11 +235,31 @@ export function createServer(store = openDatabase(),
   return server;
 }
 
+/** Adresy IPv4 tej maszyny — to je wpisuje się w telefonie, bo `localhost` wskazuje sam telefon. */
+export function adresyLokalne() {
+  const out = [];
+  for (const lista of Object.values(networkInterfaces())) {
+    for (const i of lista || []) if (i.family === "IPv4" && !i.internal) out.push(i.address);
+  }
+  return out;
+}
+
 if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
   const szyfrowany = !!(process.env.HERO_TLS_KEY && process.env.HERO_TLS_CERT);
+  const schemat = szyfrowany ? "https" : "http";
   const port = Number(process.env.PORT || (szyfrowany ? 8443 : 8080));
   createServer().listen(port, () => {
-    console.log(`HERO działa na ${szyfrowany ? "https" : "http"}://localhost:${port}`);
-    if (!szyfrowany) console.log("Bez TLS-a przeglądarka nie da zapisu opaski NFC — patrz `npm run cert`.");
+    console.log(`HERO działa na ${schemat}://localhost:${port}`);
+    const lan = adresyLokalne();
+    if (lan.length) {
+      console.log("Z telefonu w tej samej sieci:");
+      for (const ip of lan) console.log(`  ${schemat}://${ip}:${port}`);
+    } else {
+      console.log("Ten komputer nie ma adresu IPv4 w sieci lokalnej — telefon się nie połączy.");
+    }
+    if (!szyfrowany) {
+      console.log("Bez TLS-a przeglądarka nie da zapisu opaski NFC ani skrótu PIN-u z crypto.subtle.");
+      console.log("Certyfikat do testów: `npm run cert`.");
+    }
   });
 }

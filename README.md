@@ -51,8 +51,10 @@ wszystkie źródła zewnętrzne — strona nie wysyła żadnego żądania poza w
 Do zapisania opaski potrzebny jest telefon z Androidem, Chrome i włączonym NFC. Telefon i komputer
 muszą być w tej samej sieci.
 
-1. `npm run cert` — wypisze adres w rodzaju `https://192.168.1.14:8443`. To ten adres wpiszesz
-   w telefonie, a nie `localhost`.
+1. `npm run cert` — wypisze adres **tego komputera** w sieci lokalnej. Będzie miał postać
+   `https://<adres>:8443`, gdzie `<adres>` to cztery liczby wypisane przez skrypt; adresy z przykładów
+   w tym pliku są cudze i nie zadziałają. Ten sam adres wypisuje serwer przy starcie. W telefonie
+   wpisuje się właśnie jego, nigdy `localhost` — `localhost` w telefonie znaczy sam telefon.
 2. `HERO_TLS_KEY=data/tls/key.pem HERO_TLS_CERT=data/tls/cert.pem npm start`
 3. W telefonie otwórz ten adres i przejdź ostrzeżenie o certyfikacie („Zaawansowane" → „Przejdź do…").
 4. „Moja karta" → „Załóż kartę": nazwisko i PIN. Aplikacja od razu otworzy zakładkę „Opaska NFC"
@@ -61,6 +63,11 @@ muszą być w tej samej sieci.
    pokaże, co się zapisało.
 6. Zablokuj ekran, zbliż opaskę: telefon otworzy kartę. Na twoim telefonie zapyta o PIN, bo ta
    przeglądarka już tę kartę otwierała; na cudzym pokaże odczyt ratunkowy bez pytania o nic.
+
+Czysta opaska, przed zapisem, nie robi przy telefonie nic: nie ma na niej żadnego rekordu, więc nie ma
+czego otworzyć — bez dźwięku, bez wibracji, bez komunikatu. Brak reakcji na nowy brelok nie znaczy, że
+telefon albo brelok są zepsute. Anteny NFC w telefonach z Androidem siedzą zwykle w górnej połowie
+pleców, przy aparacie, i brelok trzeba przyłożyć dokładnie tam.
 
 Jeśli „Zapisz kartę na opasce" jest wyszarzone, powód jest jeden z trzech: strona chodzi po `http://`
 zamiast `https://`, przeglądarka nie jest Chrome na Androidzie, albo moduł NFC jest wyłączony
