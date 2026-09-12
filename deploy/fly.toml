@@ -1,0 +1,45 @@
+# Fly.io — wymaga komputera z zainstalowanym flyctl; z samego telefonu tą drogą nie pójdzie.
+# Skopiuj ten plik do katalogu głównego repozytorium (obok Dockerfile'a), zanim wdrożysz:
+#
+#   cp deploy/fly.toml fly.toml
+#   fly launch --no-deploy --copy-config
+#   fly volumes create hero_data --size 1 --region waw
+#   fly deploy
+#
+# Co daje: HTTPS od razu, wolumen na bazę, region w Warszawie, maszyna zatrzymywana przy braku ruchu
+# (auto_stop_machines) i budzona żądaniem — pierwsze zbliżenie opaski po przerwie czeka wtedy chwilę.
+# Kto tego nie chce, ustawia min_machines_running = 1.
+
+app = "hero"
+primary_region = "waw"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  HERO_DB = "/data/hero.sqlite"
+  PORT = "8080"
+
+[[mounts]]
+  source = "hero_data"
+  destination = "/data"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+  [[http_service.checks]]
+    interval = "30s"
+    timeout = "3s"
+    grace_period = "5s"
+    method = "GET"
+    path = "/api/health"
+
+# SQLite nie znosi dwóch procesów piszących do jednego pliku na dysku sieciowym, a liczniki
+# z server/limit.js żyją w pamięci procesu. Jedna maszyna, nie dwie.
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"

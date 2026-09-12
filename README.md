@@ -230,6 +230,7 @@ test/qr.test.js   koder kodu QR (blok QR wycięty z web/app.html)
 test/karta.test.js zawartość i kolejność odczytu ratunkowego (blok KARTA)
 .github/workflows testy na każdy push i pull request (Node 22.13, 22 i 24);
                   strona.yml wystawia aplikację na GitHub Pages
+deploy/           gotowe pliki wdrożenia: Render, Fly.io, docker compose z Caddym
 docs/             model danych i plan rozwoju
 ```
 
@@ -317,6 +318,11 @@ Stan na dziś to działający prototyp, nie system produkcyjny. Przed wdrożenie
 Serwer to jeden proces Node i plik SQLite obok niego; zależności z npm nie ma żadnych. TLS kończy
 się na reverse proxy — serwer umie HTTPS sam (patrz [HTTPS](#https)), ale certyfikat z urzędu,
 przekierowanie z portu 80 i limit żądań wygodniej trzymać w proxy.
+
+Gotowe pliki dla trzech dróg leżą w [`deploy/`](deploy/README.md): Render (jedyna droga, którą da się
+przejść z samego telefonu), Fly.io (wymaga `flyctl`, więc komputera) i własny serwer na docker compose
+z Caddym. `deploy/README.md` mówi, co kiedy wybrać i co skopiować. Sekcje niżej opisują to samo od
+strony pojedynczych narzędzi.
 
 ### Kontener
 

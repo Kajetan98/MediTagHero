@@ -1,0 +1,17 @@
+# Caddy sam bierze certyfikat z Let's Encrypt i odnawia go, byle domena wskazywała na ten serwer.
+# Wpisz swoją domenę w miejsce hero.example.
+
+hero.example {
+	reverse_proxy hero:8080
+	encode gzip
+	log {
+		output file /data/hero-access.log
+		format json
+	}
+}
+
+# Limitu żądań nie ma tutaj celowo: `rate_limit` nie jest wbudowaną dyrektywą Caddy'ego, wymaga
+# obrazu zbudowanego z wtyczką (xcaddy build --with github.com/mholt/caddy-ratelimit), a obraz
+# caddy:2-alpine z takim wpisem w ogóle nie wstanie. Liczniki z server/limit.js działają dalej, ale
+# za proxy widzą adres proxy, czyli liczą wszystkich razem. Kto chce limitu przed aplikacją, ma dwie
+# drogi: nginx z limit_req (przykład w README, sekcja „Reverse proxy") albo Caddy z tą wtyczką.
