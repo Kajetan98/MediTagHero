@@ -74,6 +74,17 @@ zamiast `https://`, przeglądarka nie jest Chrome na Androidzie, albo moduł NFC
 w ustawieniach telefonu. Zostaje wtedy kod QR i zapis adresu dowolną aplikacją do NFC jako rekord
 typu URL.
 
+### Bez komputera: strona na GitHub Pages
+
+Cała droga wyżej wymaga serwera na własnym komputerze. Do pierwszej opaski wystarczy sam telefon,
+bo `.github/workflows/strona.yml` wystawia aplikację pod adresem
+<https://kajetan98.github.io/MediTagHero/> — po HTTPS, więc Chrome na Androidzie da tam Web NFC.
+
+Pod tym adresem nie ma API HERO, więc aplikacja schodzi do trybu bez serwera: karta leży w pamięci
+tej przeglądarki, która ją założyła. Do zapisania opaski i odczytania jej tym samym telefonem to
+wystarcza. Karta odczytana z cudzego telefonu wymaga serwera — opaska zaprowadzi tamten telefon pod
+ten sam adres, ale karty pod nim nie znajdzie.
+
 Bez uruchomionego serwera ten sam plik działa samodzielnie: aplikacja wykrywa brak `/api/health`
 i zapisuje karty w `localStorage` przeglądarki — razem ze skrótem PIN-u i historią odczytów, bo nic
 nie opuszcza tej jednej przeglądarki. W tym trybie działa jako demo i jako Artifact.
@@ -182,7 +193,8 @@ test/api.test.js  testy API
 test/nfc.test.js  identyfikator i adres opaski (blok NFC wycięty z web/app.html)
 test/qr.test.js   koder kodu QR (blok QR wycięty z web/app.html)
 test/karta.test.js zawartość i kolejność odczytu ratunkowego (blok KARTA)
-.github/workflows testy na każdy push i pull request (Node 22.13, 22 i 24)
+.github/workflows testy na każdy push i pull request (Node 22.13, 22 i 24);
+                  strona.yml wystawia aplikację na GitHub Pages
 docs/             model danych i plan rozwoju
 ```
 
