@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createServer, tlsFromEnv } from "../server/index.js";
+import { createServer, tlsFromEnv, adresyLokalne } from "../server/index.js";
 import { openDatabase } from "../server/db.js";
 import { rateLimiter } from "../server/limit.js";
 
@@ -423,4 +423,13 @@ test("PIN zmienia się bez ruszania karty i historii", async () => {
   assert.equal(sesja.body.person.name, "Jan Kowalski", "treść karty zostaje");
   assert.equal(sesja.body.reads.length, 1, "historia odczytów zostaje");
   assert.equal((await J(`/api/cards/${tag}`)).status, 200, "odczyt ratunkowy działa dalej — PIN go nie dotyczy");
+});
+
+test("serwer zna adresy, pod którymi zobaczy go telefon", () => {
+  const lista = adresyLokalne();
+  assert.ok(Array.isArray(lista), "lista adresów IPv4 tej maszyny");
+  for (const ip of lista) {
+    assert.match(ip, /^\d{1,3}(\.\d{1,3}){3}$/, ip);
+    assert.notEqual(ip, "127.0.0.1", "pętla zwrotna prowadzi z telefonu do samego telefonu, nie do serwera");
+  }
 });
