@@ -184,6 +184,12 @@ którą pacjent nosi. Rozwiązanie identyfikatora bez treści karty daje `GET /a
 Identyfikator zajęty przez nośnik nie założy pod sobą własnej karty (`upsert` odpowiada 409):
 prowadziłby wtedy w dwa miejsca naraz.
 
+**Słownictwo danych zostaje po polsku.** `status`, `kind`, `route`, `source`, `ctx` i rodzaj nośnika
+zapisują się w bazie po polsku niezależnie od języka interfejsu: to wartości, po których kod
+rozpoznaje stan, a nie napisy dla oka. Tłumaczy się je dopiero przy wyświetlaniu (`t(wartość)`
+w `web/app.html`, spis w `T_DANE`). Dzięki temu karta założona po angielsku czyta się tak samo po
+polsku i na odwrót, a zmiana języka nie zmienia treści karty.
+
 **Identyfikatory wpisów nadaje przeglądarka** (`Math.random`), bo wpisy nie wychodzą poza jedną kartę.
 Identyfikatory odczytów nadaje serwer (`randomUUID`), bo są dowodem dostępu — poza trybem bez
 serwera i sytuacją, w której zapis odczytu nie dochodzi; wtedy identyfikator i czas pochodzą

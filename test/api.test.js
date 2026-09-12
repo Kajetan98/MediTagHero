@@ -124,7 +124,9 @@ test("zestaw ratunkowy w przeglądarce i na serwerze opisuje ten sam zakres", as
   const blok = src.match(/\/\* KARTA:START[\s\S]*?\/\* KARTA:END \*\//);
   const ageSrc = src.match(/^const age = .*$/m);
   assert.ok(blok && ageSrc, "w web/app.html nie ma bloku KARTA ani helpera age");
-  const { rescueOf } = runInNewContext("(function(){" + ageSrc[0] + "\n" + blok[0] + "\nreturn {rescueOf};})()");
+  /* Blok liczy napisy przez `t()`; tu interesuje nas sam zakres danych, więc wystarczy przelotka. */
+  const stub = "const t = x => x; const tf = (pl, ...w) => pl;";
+  const { rescueOf } = runInNewContext("(function(){" + stub + "\n" + ageSrc[0] + "\n" + blok[0] + "\nreturn {rescueOf};})()");
 
   const kli = rescueOf(store.cards.fullCard(TAG));
   const srv = (await J(`/api/cards/${TAG}`)).body;

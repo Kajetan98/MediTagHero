@@ -23,7 +23,7 @@ flagi `--experimental-sqlite`, której serwer nie ustawia. Projekt nie ma zależ
 npm start          # buduje public/index.html i startuje serwer na :8080
 npm run seed       # przykładowa karta HERO-2481-KX (PIN 1234) i konto lekarza (PWZ 1234567, hasło meditag123)
 npm run cert       # certyfikat samopodpisany do testów po HTTPS (wymaga openssl)
-npm test           # testy API, identyfikatora nośnika i kodera QR (node:test)
+npm test           # testy API, identyfikatora nośnika, kodera QR i tłumaczeń (node:test)
 ```
 
 Baza powstaje w `data/hero.sqlite`; ścieżkę zmienia zmienna `HERO_DB`, port — `PORT`.
@@ -134,6 +134,28 @@ otwiera kartę do odczytu, a zapis wymaga PIN-u pacjenta i konta lekarza.
 Kolejność w odczycie ratunkowym jest celowa: najpierw alergie i anafilaksja, potem leki
 (z wyróżnionymi antykoagulantami), choroby aktywne, wszczepy i uwagi, na końcu kontakt alarmowy.
 
+## Język: polski i angielski
+
+Cały interfejs jest dwujęzyczny. Przełącznik **PL / EN** stoi w pasku górnym, a wybór zapamiętuje się
+w `localStorage` pod kluczem `hero.lang.v1`. Bez wyboru aplikacja bierze język przeglądarki: telefon
+ustawiony po angielsku otwiera odczyt ratunkowy po angielsku, bez klikania czegokolwiek — o to
+w tym chodzi, bo ratownik z zagranicy nie będzie szukał przełącznika nad nieprzytomnym pacjentem.
+Zmiana języka przerysowuje bieżący ekran w miejscu: otwarta karta zostaje otwarta, a na ekranie
+odczytu nie dokłada drugiego wpisu do historii.
+
+Polski jest źródłem, angielski leży w słowniku `EN` na końcu `web/app.html`. Kluczem jest dokładny
+napis polski — razem ze znacznikami, jeśli literał je niesie — więc napis bez wpisu w słowniku
+zostaje po polsku, zamiast zniknąć. Napisy z wartościami w środku mają miejsca `{0}`, `{1}`, żeby
+tłumaczenie mogło ustawić je w innej kolejności.
+
+Wartości zapisane w karcie zostają po polsku, bo to dane, nie etykiety: `aktywna`, `doustnie`,
+`brelok`, `dostęp lekarza`. Na ekran idą przez `t(wartość)`, a ich spis leży w `T_DANE`.
+
+`test/i18n.test.js` pilnuje trzech rzeczy: każdy napis objęty `t()` ma wpis w słowniku, tłumaczenie
+ma ten sam szkielet znaczników i te same miejsca na wartości co oryginał, a w słowniku nie ma wpisów
+bez użycia. Nowy napis w kodzie bez wpisu w słowniku wywala testy — tak, żeby interfejs nie rozjechał
+się na pół polski, pół angielski.
+
 ## Nośniki: opaska, brelok, karta do portfela
 
 Jedna karta, kilka rzeczy, które do niej prowadzą. Opaska trzyma się nadgarstka i nie gubi, więc
@@ -228,6 +250,7 @@ test/api.test.js  testy API
 test/nfc.test.js  identyfikator i adres nośnika (blok NFC wycięty z web/app.html)
 test/qr.test.js   koder kodu QR (blok QR wycięty z web/app.html)
 test/karta.test.js zawartość i kolejność odczytu ratunkowego (blok KARTA)
+test/i18n.test.js pokrycie słownika angielskiego i wybór języka
 .github/workflows testy na każdy push i pull request (Node 22.13, 22 i 24);
                   strona.yml wystawia aplikację na GitHub Pages
 deploy/           gotowe pliki wdrożenia: Render, Fly.io, docker compose z Caddym

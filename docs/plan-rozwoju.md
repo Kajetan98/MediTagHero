@@ -108,6 +108,10 @@ potrzebowała, żeby obsłużyć drugie urządzenie obok MediTag, niezależnie o
 Zanim to trafi do kodu, potrzebny jest opis: co EPI mierzy lub przechowuje, kto jest odbiorcą
 odczytu i czy dane trafiają do tej samej karty pacjenta.
 
+Dwujęzyczność, którą ma już HERO, obejmie EPI z automatu, o ile jego ekrany powstaną w tej samej
+aplikacji: słownik i przełącznik są wspólne dla całego `web/app.html`. Osobnej aplikacji EPI trzeba
+będzie przenieść ten sam mechanizm.
+
 ## 8. Odczyt poza aplikacją i poza siecią
 
 Wcześniejsze punkty zakładają, że ratownik ma działający telefon z NFC i zasięg. Każde z tych
@@ -115,12 +119,14 @@ założeń bywa fałszywe, a karta ma sens tylko wtedy, gdy da się ją odczyta�
 
 - ~~kod QR z tym samym adresem obok tagu NFC~~ — zrobione: kod QR z adresem karty jest w zakładce
   „Opaska NFC", koder w `web/app.html`, bez zależności,
-- ~~widok do druku (`@media print`)~~ — zrobione: „Wydrukuj kartę do portfela" w zakładce „Opaska NFC"
+- ~~widok do druku (`@media print`)~~ — zrobione: „Wydrukuj kartę do portfela" w zakładce „Nośniki"
   składa zestaw krytyczny na jedną stronę, z kodem QR. Eksport do PDF robi okno drukowania przeglądarki,
   osobnego generatora nie ma,
 - odczyt ratunkowy dostępny offline (service worker), bo w karetce brak zasięgu jest normą,
-- wersja angielska odczytu. Model ma pole `person.langs`, ale interfejs jest wyłącznie polski —
-  dotyczy to zarówno pacjenta za granicą, jak i obcokrajowca leczonego w Polsce.
+- ~~wersja angielska odczytu~~ — zrobione: cały interfejs jest dwujęzyczny, przełącznik PL / EN stoi
+  w pasku górnym, a telefon ustawiony po angielsku otwiera odczyt po angielsku bez klikania. Zostaje
+  treść wpisywana przez pacjenta: nazwa leku i rozpoznania zostają w języku, w którym je wpisano,
+  bo to dane, nie napisy interfejsu. Słownik nazw leków (niżej) rozwiązałby i to.
 
 Osobno: alergie, leki i rozpoznania wpisuje się dziś wolnym tekstem, a pola `atc` i `icd10`
 wypełnia człowiek. Słownik podpowiadający nazwy wyłapałby literówkę w nazwie leku, której przy

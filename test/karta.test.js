@@ -16,8 +16,11 @@ assert.ok(blok, "w web/app.html nie ma bloku KARTA:START … KARTA:END");
    dublował logiki obliczania wieku. */
 const ageSrc = src.match(/^const age = .*$/m);
 assert.ok(ageSrc, "w web/app.html nie ma helpera age");
+/* Napisy przechodzą przez `t()`/`tf()`. Tutaj sprawdzamy wersję polską, czyli zachowanie bez
+   tłumaczenia; pokrycie słownika angielskiego pilnuje test/i18n.test.js. */
+const stubJezyka = 'const t = x => x; const tf = (pl, ...w) => pl.replace(/\\{(\\d)\\}/g, (_, i) => w[Number(i)]);';
 const { critical, rescueOf, roAllergies, roMeds, roFlags, handoverText } = runInNewContext(
-  "(function(){" + ageSrc[0] + "\n" + blok[0] + "\nreturn {critical, rescueOf, roAllergies, roMeds, roFlags, handoverText};})()");
+  "(function(){" + stubJezyka + "\n" + ageSrc[0] + "\n" + blok[0] + "\nreturn {critical, rescueOf, roAllergies, roMeds, roFlags, handoverText};})()");
 
 const karta = () => ({
   tagId: "HERO-2481-KX",
