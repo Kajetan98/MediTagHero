@@ -80,9 +80,13 @@ Cała droga wyżej wymaga serwera na własnym komputerze. Do pierwszej opaski wy
 bo `.github/workflows/strona.yml` wystawia aplikację pod adresem
 <https://kajetan98.github.io/MediTagHero/> — po HTTPS, więc Chrome na Androidzie da tam Web NFC.
 
-Raz, przed pierwszym wdrożeniem, trzeba włączyć Pages w repozytorium: **Settings → Pages → Build and
-deployment → Source: GitHub Actions**. Token przepływu nie ma prawa zrobić tego za nas, więc do tego
-czasu przepływ kończy się ostrzeżeniem i pomija wdrożenie, zamiast wywracać się na czerwono.
+Wdrożenie idzie przez gałąź `gh-pages`: przepływ buduje `public/` i wypycha jej zawartość na tę
+gałąź przy każdym pchnięciu do `main`. Nie przez `actions/deploy-pages`, bo token przepływu nie ma
+w tym repozytorium prawa przestawić Pages na budowanie z Actions — odpowiada 403 — a do wypchnięcia
+gałęzi wystarcza `contents: write`. Samo Pages włączyło się z chwilą pojawienia się gałęzi
+`gh-pages`, więc nie ma tu nic do klikania w ustawieniach.
+
+Gałąź `gh-pages` jest wynikiem budowania, nie źródłem: zmiany wprowadza się w `web/app.html`.
 
 Pod tym adresem nie ma API HERO, więc aplikacja schodzi do trybu bez serwera: karta leży w pamięci
 tej przeglądarki, która ją założyła. Do zapisania opaski i odczytania jej tym samym telefonem to

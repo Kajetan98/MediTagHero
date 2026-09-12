@@ -1,5 +1,10 @@
-# Wystawia aplikację pod adresem HTTPS na GitHub Pages. Bez tego zapis opaski wymaga serwera
-# uruchomionego na własnym komputerze, bo Web NFC działa wyłącznie w bezpiecznym kontekście.
+# Wystawia aplikację pod adresem HTTPS: https://kajetan98.github.io/MediTagHero/
+# Bez tego zapis opaski wymaga serwera na własnym komputerze, bo Web NFC działa wyłącznie
+# w bezpiecznym kontekście.
+#
+# Wdrożenie idzie przez gałąź gh-pages, nie przez actions/deploy-pages: token przepływu nie ma
+# w tym repozytorium prawa przestawić Pages na budowanie z Actions (odpowiada 403 na próbie),
+# a do wypchnięcia gałęzi wystarcza `contents: write`.
 #
 # Pod tym adresem nie ma API HERO, więc aplikacja schodzi do trybu bez serwera: karty leżą
 # w pamięci przeglądarki, która je założyła. Do zapisania opaski i odczytania jej tym samym
@@ -12,21 +17,16 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
-  pages: write
-  id-token: write
+  contents: write
 
 # Jedno wdrożenie naraz; kolejnego pchnięcia nie przerywamy w połowie.
 concurrency:
-  group: pages
+  group: strona
   cancel-in-progress: false
 
 jobs:
   wystaw:
     runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.wdrozenie.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -35,22 +35,27 @@ jobs:
       # public/index.html jest w repozytorium, ale budujemy je jeszcze raz, żeby na stronie
       # nie wylądowała wersja rozjechana z web/app.html.
       - run: npm run build
-      # Token przepływu nie zawsze ma prawo włączyć Pages w repozytorium. Gdy nie ma, nie wywracamy
-      # przebiegu na czerwono — wypisujemy, co kliknąć, i pomijamy wdrożenie do następnego razu.
-      - id: pages
-        uses: actions/configure-pages@v5
-        continue-on-error: true
-        with:
-          enablement: true
-      - if: steps.pages.outcome != 'success'
+      - name: Wypchnij zawartość public/ na gałąź gh-pages
+        env:
+          # Adres z tokenem trzymamy w zmiennej, żeby nie wyciekł do dziennika w treści polecenia.
+          ADRES: https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
         run: |
-          echo "::warning::GitHub Pages nie jest włączone dla tego repozytorium, więc nie ma dokąd wystawić strony."
-          echo "Włącza się je raz: Settings → Pages → Build and deployment → Source: GitHub Actions."
-          echo "Potem wystarczy uruchomić ten przepływ ponownie (Actions → strona → Run workflow)."
-      - if: steps.pages.outcome == 'success'
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: public
-      - id: wdrozenie
-        if: steps.pages.outcome == 'success'
-        uses: actions/deploy-pages@v4
+          set -eu
+          katalog="$(mktemp -d)"
+          # Historia gałęzi zostaje: dopisujemy wdrożenie, nie przepisujemy jej od nowa.
+          git clone --quiet --depth 1 --branch gh-pages "$ADRES" "$katalog"
+          find "$katalog" -mindepth 1 -maxdepth 1 -not -name .git -exec rm -rf {} +
+          cp -r public/. "$katalog/"
+          # .nojekyll: bez niego Pages przepuszcza treść przez Jekylla i gubi pliki od podkreślnika.
+          touch "$katalog/.nojekyll"
+          cd "$katalog"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --quiet --cached; then
+            echo "Strona jest już aktualna — nie ma czego wypychać."
+            exit 0
+          fi
+          git commit --quiet -m "Strona z ${GITHUB_SHA}"
+          git push --quiet origin gh-pages
+          echo "Wystawione: https://${GITHUB_REPOSITORY_OWNER}.github.io/${GITHUB_REPOSITORY#*/}/"
