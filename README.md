@@ -80,6 +80,10 @@ Cała droga wyżej wymaga serwera na własnym komputerze. Do pierwszej opaski wy
 bo `.github/workflows/strona.yml` wystawia aplikację pod adresem
 <https://kajetan98.github.io/MediTagHero/> — po HTTPS, więc Chrome na Androidzie da tam Web NFC.
 
+Raz, przed pierwszym wdrożeniem, trzeba włączyć Pages w repozytorium: **Settings → Pages → Build and
+deployment → Source: GitHub Actions**. Token przepływu nie ma prawa zrobić tego za nas, więc do tego
+czasu przepływ kończy się ostrzeżeniem i pomija wdrożenie, zamiast wywracać się na czerwono.
+
 Pod tym adresem nie ma API HERO, więc aplikacja schodzi do trybu bez serwera: karta leży w pamięci
 tej przeglądarki, która ją założyła. Do zapisania opaski i odczytania jej tym samym telefonem to
 wystarcza. Karta odczytana z cudzego telefonu wymaga serwera — opaska zaprowadzi tamten telefon pod
