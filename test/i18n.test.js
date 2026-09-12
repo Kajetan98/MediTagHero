@@ -10,8 +10,11 @@ import { runInNewContext } from "node:vm";
  * oryginał (inaczej podmiana rozwaliłaby układ strony) i te same miejsca na wartości `{0}`.
  */
 const src = readFileSync(new URL("../web/app.html", import.meta.url), "utf8");
-const szkielet = src.split("<script>")[0];
-const skrypt = src.split("<script>")[1].split("</script>")[0];
+/* Skryptów w pliku jest dwa: krótki, który ustawia motyw przed pierwszym rysowaniem, i właściwa
+   aplikacja na końcu. Napisy interfejsu są w tym drugim, a atrybuty data-t w treści przed nim. */
+const kawalki = src.split("<script>");
+const skrypt = kawalki[kawalki.length - 1].split("</script>")[0];
+const szkielet = kawalki.slice(0, -1).join("<script>");
 
 const blok = skrypt.match(/const EN = \{\n[\s\S]*?\n\};/);
 assert.ok(blok, "w web/app.html nie ma słownika EN");
@@ -60,23 +63,4 @@ test("tłumaczenie trzyma szkielet znaczników i miejsca na wartości", () => {
 test("słownik nie niesie napisów, których w kodzie już nie ma", () => {
   const zbedne = Object.keys(EN).filter(k => !klucze.includes(k));
   assert.deepEqual(zbedne, [], "wpisy bez użycia: " + zbedne.slice(0, 5).join(" | "));
-});
-
-test("wybór języka trzyma się przeglądarki i zapamiętanego ustawienia", () => {
-  /* Sam wybór języka nie ma DOM-u: to trzy linijki, które da się wyciąć i uruchomić. */
-  const wybor = skrypt.match(/let LANG = \(\(\) => \{[\s\S]*?\}\)\(\);/);
-  const klucz = skrypt.match(/const LSL = "([^"]+)";/);
-  assert.ok(wybor && klucz, "w web/app.html nie ma wyboru języka");
-  const jezyk = (zapamietany, przegladarka) => runInNewContext(
-    "(function(){" + wybor[0] + "\nreturn LANG;})()",
-    { LSL: klucz[1],
-      localStorage: { getItem: k => (k === klucz[1] ? zapamietany : null) },
-      navigator: { language: przegladarka } });
-
-  assert.equal(jezyk(null, "pl-PL"), "pl", "polski telefon dostaje polski");
-  assert.equal(jezyk(null, "en-GB"), "en", "angielski telefon dostaje angielski bez klikania");
-  assert.equal(jezyk(null, "de-DE"), "pl", "inny język schodzi do polskiego");
-  assert.equal(jezyk("pl", "en-GB"), "pl", "zapamiętany wybór wygrywa z językiem telefonu");
-  assert.equal(jezyk("en", "pl-PL"), "en");
-  assert.equal(jezyk("xx", "pl-PL"), "pl", "śmieci w pamięci nie zmieniają języka");
 });

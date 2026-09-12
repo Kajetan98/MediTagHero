@@ -110,6 +110,8 @@ nie opuszcza tej jednej przeglądarki. W tym trybie działa jako demo i jako Art
 | Ratownik medyczny | konto z numerem rejestru + identyfikator z nośnika | czyta całą kartę bez PIN-u; karty nie redaguje i nie podpisuje wpisów |
 | Bez konta | sam identyfikator z nośnika | zestaw ratunkowy: grupa krwi, wiek, alergie, antykoagulanty, rozpoznania nieprzebyte, wszczepy, DNR — bez nazwiska, daty urodzenia, pozostałych leków i kontaktów |
 
+Każda rola ma jeszcze zakładkę „Ustawienia": język interfejsu i motyw jasny albo ciemny.
+
 Zakres bez konta wyznacza serwer, w `rescueCard` w `server/db.js`: dane, których w odpowiedzi nie ma,
 nie wychodzą z bazy w ogóle, więc nie da się ich odczytać z ruchu ani z pamięci przeglądarki.
 Aplikacja liczy ten sam zakres jeszcze raz w `rescueOf`, ale tylko na potrzeby trybu bez serwera;
@@ -134,12 +136,28 @@ otwiera kartę do odczytu, a zapis wymaga PIN-u pacjenta i konta lekarza.
 Kolejność w odczycie ratunkowym jest celowa: najpierw alergie i anafilaksja, potem leki
 (z wyróżnionymi antykoagulantami), choroby aktywne, wszczepy i uwagi, na końcu kontakt alarmowy.
 
+## Ustawienia: język i motyw
+
+Zakładka „Ustawienia" zbiera dwa wybory, oba zapamiętywane w `localStorage` tej przeglądarki i oba
+z trzecim stanem „idź za urządzeniem":
+
+| Ustawienie | Stany | Klucz | Bez wyboru |
+|---|---|---|---|
+| Język | jak w telefonie · Polski · English | `hero.lang.v1` | język przeglądarki |
+| Motyw | jak w systemie · jasny · ciemny | `hero.theme.v1` | `prefers-color-scheme` |
+
+Motyw ustawia atrybut `data-theme` na dokumencie; reguły obu motywów siedzą w arkuszu na górze
+`web/app.html`, a jasny jest domyślny. Ten sam klucz czyta krótki skrypt w treści strony, przed
+resztą aplikacji — bez niego ciemny wybór mrugnąłby jasnym tłem przy każdym otwarciu. Wydruk karty
+do portfela zostaje czarno na białym niezależnie od motywu (`@media print`).
+
 ## Język: polski i angielski
 
-Cały interfejs jest dwujęzyczny. Przełącznik **PL / EN** stoi w pasku górnym, a wybór zapamiętuje się
-w `localStorage` pod kluczem `hero.lang.v1`. Bez wyboru aplikacja bierze język przeglądarki: telefon
-ustawiony po angielsku otwiera odczyt ratunkowy po angielsku, bez klikania czegokolwiek — o to
-w tym chodzi, bo ratownik z zagranicy nie będzie szukał przełącznika nad nieprzytomnym pacjentem.
+Cały interfejs jest dwujęzyczny. Poza ekranem ustawień przełącznik **PL / EN** stoi też w pasku
+górnym — dotknięcie go ustawia język wprost, bo kto go dotyka, chce konkretnego, nie „jak
+w telefonie". Bez wyboru aplikacja bierze język przeglądarki: telefon ustawiony po angielsku otwiera
+odczyt ratunkowy po angielsku, bez klikania czegokolwiek — o to w tym chodzi, bo ratownik
+z zagranicy nie będzie szukał przełącznika nad nieprzytomnym pacjentem.
 Zmiana języka przerysowuje bieżący ekran w miejscu: otwarta karta zostaje otwarta, a na ekranie
 odczytu nie dokłada drugiego wpisu do historii.
 
@@ -250,7 +268,8 @@ test/api.test.js  testy API
 test/nfc.test.js  identyfikator i adres nośnika (blok NFC wycięty z web/app.html)
 test/qr.test.js   koder kodu QR (blok QR wycięty z web/app.html)
 test/karta.test.js zawartość i kolejność odczytu ratunkowego (blok KARTA)
-test/i18n.test.js pokrycie słownika angielskiego i wybór języka
+test/i18n.test.js pokrycie słownika angielskiego
+test/ustawienia.test.js wybór języka i motywu, komplet zmiennych obu motywów
 .github/workflows testy na każdy push i pull request (Node 22.13, 22 i 24);
                   strona.yml wystawia aplikację na GitHub Pages
 deploy/           gotowe pliki wdrożenia: Render, Fly.io, docker compose z Caddym

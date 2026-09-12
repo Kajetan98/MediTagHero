@@ -95,6 +95,10 @@ code,.mono{font-family:var(--f-mono)}
 .lang{display:flex;border:1px solid var(--line-2);border-radius:5px;overflow:hidden}
 .lang button{font-family:var(--f-mono);font-size:.68rem;letter-spacing:.06em;padding:.2rem .45rem;border:0;background:transparent;color:var(--ink-3);cursor:pointer}
 .lang button[aria-pressed="true"]{background:var(--brand);color:#fff}
+.seg{display:flex;flex-wrap:wrap;gap:.4rem}
+.seg button{font-family:var(--f-body);font-size:.92rem;padding:.45rem .8rem;border:1px solid var(--line-2);
+  border-radius:7px;background:var(--surface-2);color:var(--ink);cursor:pointer}
+.seg button[aria-pressed="true"]{background:var(--brand);border-color:var(--brand);color:var(--on-brand);font-weight:600}
 @media (max-width:720px){.topbar .wrap{height:auto;padding-block:.5rem;flex-wrap:wrap}.nav{width:100%;margin-left:0;order:3}.chip-mode{margin-left:auto}}
 @media print{.lang{display:none}}
 
@@ -265,6 +269,9 @@ footer .wrap{display:flex;gap:1.2rem;justify-content:space-between;align-items:c
 }
 </style>
 
+  <script>/* Motyw ustawiamy przed pierwszym rysowaniem, żeby ciemny wybór nie mrugnął jasnym tłem. */
+  try { var m = localStorage.getItem("hero.theme.v1"); if (m === "light" || m === "dark") document.documentElement.setAttribute("data-theme", m); } catch (e) {}</script>
+
 <svg class="sr" aria-hidden="true"><defs>
 <symbol id="i-nfc" viewBox="0 0 24 24">
   <path d="M7 4.5a11 11 0 0 0 0 15M11 7.2a6 6 0 0 0 0 9.6M15 9.6a2.6 2.6 0 0 0 0 4.8" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
@@ -281,6 +288,7 @@ footer .wrap{display:flex;gap:1.2rem;justify-content:space-between;align-items:c
       <a href="#/karta" data-t="Moja karta">Moja karta</a>
       <a href="#/odczyt" data-t="Odczyt ratunkowy">Odczyt ratunkowy</a>
       <a href="#/lekarz" data-t="Konto zawodowe">Konto zawodowe</a>
+      <a href="#/ustawienia" data-t="Ustawienia">Ustawienia</a>
     </nav>
     <div class="lang" id="lang" role="group" data-t-aria="Język strony" aria-label="Język strony">
       <button type="button" data-lang="pl" aria-pressed="true">PL</button>
@@ -320,16 +328,45 @@ const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({"&":"&amp
  * przeglądarki, żeby ratownik z angielskim telefonem dostał odczyt po angielsku bez klikania.
  */
 const LSL = "hero.lang.v1";
-let LANG = (() => {
-  try { const z = localStorage.getItem(LSL); if(z === "pl" || z === "en") return z; } catch(e){}
-  return /^en\b|^en-/i.test(navigator.language || "") ? "en" : "pl";
-})();
+const jezykPrzegladarki = () => /^en\b|^en-/i.test(navigator.language || "") ? "en" : "pl";
+/** Ustawienie z ekranu ustawień: „auto" znaczy „jak w telefonie". */
+const zapamietanyJezyk = () => { try { const z = localStorage.getItem(LSL); if(z === "pl" || z === "en") return z; } catch(e){} return "auto"; };
+let LANG_WYBOR = zapamietanyJezyk();
+let LANG = LANG_WYBOR === "auto" ? jezykPrzegladarki() : LANG_WYBOR;
 const t = pl => (LANG === "en" && EN[pl]) || pl;
 /** Napis z wartościami w miejscach {0}, {1}: w tłumaczeniu mogą stać w innej kolejności. */
 const tf = (pl, ...w) => t(pl).replace(/\{(\d)\}/g, (_, i) => w[Number(i)]);
 /** Funkcja przerysowująca bieżący ekran po zmianie języka. Ekrany, które zapisują odczyt w historii,
  *  podstawiają tu przerysowanie z już pobranej karty — inaczej zmiana języka dokładałaby wpis. */
 let REPAINT = null;
+
+/* ---------------- motyw ---------------- */
+/**
+ * Trzy stany: „auto" idzie za ustawieniem systemu (`prefers-color-scheme`), a jasny i ciemny
+ * wymusza atrybut `data-theme` na dokumencie — reguły obu motywów siedzą w arkuszu na górze pliku.
+ * Ten sam klucz czyta skrypt w treści strony, żeby ciemny motyw nie mrugnął jasnym tłem przy starcie.
+ */
+const LST = "hero.theme.v1";
+const MOTYWY = ["auto", "light", "dark"];
+const zapamietanyMotyw = () => { try { const z = localStorage.getItem(LST); if(MOTYWY.includes(z)) return z; } catch(e){} return "auto"; };
+let MOTYW = zapamietanyMotyw();
+function malujMotyw(){
+  if(MOTYW === "auto") document.documentElement.removeAttribute("data-theme");
+  else document.documentElement.setAttribute("data-theme", MOTYW);
+}
+function ustawMotyw(wybor){
+  MOTYW = MOTYWY.includes(wybor) ? wybor : "auto";
+  try { MOTYW === "auto" ? localStorage.removeItem(LST) : localStorage.setItem(LST, MOTYW); } catch(e){}
+  malujMotyw();
+}
+/** Zmiana języka: zapamiętanie wyboru i przerysowanie ekranu, na którym stoi użytkownik. */
+function ustawJezyk(wybor){
+  LANG_WYBOR = (wybor === "pl" || wybor === "en") ? wybor : "auto";
+  try { LANG_WYBOR === "auto" ? localStorage.removeItem(LSL) : localStorage.setItem(LSL, LANG_WYBOR); } catch(e){}
+  LANG = LANG_WYBOR === "auto" ? jezykPrzegladarki() : LANG_WYBOR;
+  paintShell();
+  if(REPAINT) REPAINT(); else route();
+}
 const uid = () => Math.random().toString(36).slice(2, 9);
 const nowISO = () => new Date().toISOString();
 const fmtDT = iso => { try { return new Date(iso).toLocaleString(LANG === "en" ? "en-GB" : "pl-PL", {dateStyle:"short", timeStyle:"short"}); } catch(e){ return iso || "—"; } };
@@ -2192,6 +2229,53 @@ async function renderTagLanding(tagId, params){
   return tagReadout(tagId);
 }
 
+/* ---------------- ustawienia ---------------- */
+/**
+ * Język i motyw. Oba wybory leżą w pamięci tej przeglądarki i nie wychodzą na serwer, więc na innym
+ * telefonie trzeba je ustawić od nowa. „Jak w telefonie" i „jak w systemie" znaczą: nic nie
+ * zapamiętujemy i idziemy za ustawieniem urządzenia.
+ */
+function renderSettings(){
+  const grupa = (nazwa, biezacy, opcje) => '<div class="seg" data-grupa="' + nazwa + '">'
+    + opcje.map(([w, etykieta]) => '<button type="button" data-wybor="' + w + '" aria-pressed="'
+        + (biezacy === w) + '">' + esc(etykieta) + '</button>').join("")
+    + '</div>';
+
+  view.innerHTML = '<div class="stack" id="ustawienia" style="max-width:760px;margin-inline:auto">'
+  + '<div><p class="eyebrow">' + esc(t("Ustawienia")) + '</p><h1 style="font-size:2rem">' + esc(t("Język i wygląd")) + '</h1>'
+  + '<p class="muted" style="margin-top:.5rem">' + esc(t("Oba ustawienia zostają w pamięci tej przeglądarki i nie wychodzą na serwer. Na innym telefonie trzeba je wybrać jeszcze raz.")) + '</p></div>'
+
+  + '<div class="panel"><div class="panel-h"><h3>' + esc(t("Język")) + '</h3></div><div class="panel-b">'
+  +   grupa("jezyk", LANG_WYBOR, [["auto", t("Jak w telefonie")], ["pl", "Polski"], ["en", "English"]])
+  +   '<p class="tiny muted" style="margin-top:.7rem">'
+  +     esc(LANG_WYBOR === "auto"
+        ? tf("Teraz: {0} — tak ustawiony jest ten telefon.", LANG === "en" ? "English" : "Polski")
+        : t("Wybór zapamiętany. Ratownik z innym telefonem i tak zobaczy odczyt w swoim języku, bo liczy się ustawienie jego urządzenia."))
+  +   '</p></div></div>'
+
+  + '<div class="panel"><div class="panel-h"><h3>' + esc(t("Motyw")) + '</h3></div><div class="panel-b">'
+  +   grupa("motyw", MOTYW, [["auto", t("Jak w systemie")], ["light", t("Jasny")], ["dark", t("Ciemny")]])
+  +   '<p class="tiny muted" style="margin-top:.7rem">' + esc(t("Ciemny motyw mniej razi w nocy, jasny lepiej czyta się w słońcu. Wydruk karty do portfela zostaje czarno na białym niezależnie od tego wyboru.")) + '</p>'
+  + '</div></div>'
+  + '</div>';
+
+  /* Nasłuch wisi na treści ekranu, nie na kontenerze: treść wymienia się przy każdym przerysowaniu,
+     więc nasłuchy się nie zbierają. */
+  document.getElementById("ustawienia").addEventListener("click", e => {
+    const b = e.target.closest("[data-wybor]");
+    if(!b) return;
+    const grupaNazwa = b.closest("[data-grupa]").dataset.grupa;
+    if(grupaNazwa === "motyw"){
+      ustawMotyw(b.dataset.wybor);
+      renderSettings();
+      return;
+    }
+    /* Zmiana języka przerysowuje ekran sama — REPAINT wskazuje na ten ekran. */
+    ustawJezyk(b.dataset.wybor);
+  });
+  REPAINT = renderSettings;
+}
+
 /* ---------------- router ---------------- */
 async function route(){
   nfcStop();
@@ -2209,6 +2293,7 @@ async function route(){
   if(path === "/karta") return renderCardView();
   if(path === "/odczyt") return renderScan(params);
   if(path === "/lekarz") return renderDoctorView();
+  if(path === "/ustawienia") return renderSettings();
   /* Trasa spod adresu zapisanego w opasce: #/t/<identyfikator>. */
   if(path.indexOf("/t/") === 0) return renderTagLanding(decodeURIComponent(path.slice(3)).trim().toUpperCase(), params);
   return renderStart();
@@ -2226,15 +2311,12 @@ function paintShell(){
   modeChip.title = API ? t("Karty zapisywane w bazie serwera HERO") : t("Karty zapisywane w pamięci tej przeglądarki (localStorage)");
 }
 
+/* Przełącznik w pasku ustawia język wprost — kto go dotknie, chce konkretnego, nie „jak w telefonie".
+   Pełny wybór, razem z powrotem do ustawienia telefonu, jest na ekranie ustawień. */
 document.getElementById("lang").addEventListener("click", e => {
   const b = e.target.closest("[data-lang]");
   if(!b || b.dataset.lang === LANG) return;
-  LANG = b.dataset.lang;
-  try { localStorage.setItem(LSL, LANG); } catch(err){}
-  paintShell();
-  /* Ekran zostaje ten sam: przerysowujemy go po swojemu, bo powrót na trasę zgubiłby otwartą kartę,
-     a na ekranie odczytu dołożyłby wpis w historii. */
-  if(REPAINT) REPAINT(); else route();
+  ustawJezyk(b.dataset.lang);
 });
 
 async function boot(){
@@ -2242,6 +2324,7 @@ async function boot(){
     const r = await fetch("api/health", {cache:"no-store"});
     if(r.ok){ const j = await r.json(); API = !!(j && j.service === "hero"); }
   } catch(e){ API = false; }
+  malujMotyw();
   paintShell();
   if(!API) await ensureExample();
   window.addEventListener("hashchange", route);
@@ -2624,6 +2707,18 @@ const EN = {
   "Bez konta zobaczysz sam zestaw ratunkowy.": "Without an account you will see the emergency set only.",
   "Zalogowane konto: {0}": "Signed in as: {0}",
   "ratownik": "paramedic",
+  "Ustawienia": "Settings",
+  "Język i wygląd": "Language and appearance",
+  "Oba ustawienia zostają w pamięci tej przeglądarki i nie wychodzą na serwer. Na innym telefonie trzeba je wybrać jeszcze raz.": "Both settings stay in this browser's memory and are not sent to any server. On another phone you have to choose them again.",
+  "Język": "Language",
+  "Jak w telefonie": "As on this phone",
+  "Teraz: {0} — tak ustawiony jest ten telefon.": "Now: {0} — that is how this phone is set.",
+  "Wybór zapamiętany. Ratownik z innym telefonem i tak zobaczy odczyt w swoim języku, bo liczy się ustawienie jego urządzenia.": "Choice remembered. A paramedic with another phone will still get the read-out in their language, because their device decides.",
+  "Motyw": "Theme",
+  "Jak w systemie": "As in the system",
+  "Jasny": "Light",
+  "Ciemny": "Dark",
+  "Ciemny motyw mniej razi w nocy, jasny lepiej czyta się w słońcu. Wydruk karty do portfela zostaje czarno na białym niezależnie od tego wyboru.": "A dark theme is easier on the eyes at night, a light one reads better in sunlight. The wallet card printout stays black on white either way.",
 };
 
 boot();
